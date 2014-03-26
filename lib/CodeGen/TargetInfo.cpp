@@ -5772,6 +5772,22 @@ llvm::Value *XCoreABIInfo::EmitVAArg(llvm::Value *VAListAddr, QualType Ty,
 }
 
 //===----------------------------------------------------------------------===//
+// Leg ABI Implementation
+//===----------------------------------------------------------------------===//
+namespace {
+class LegABIInfo : public DefaultABIInfo {
+public:
+  LegABIInfo(CodeGen::CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
+};
+
+class LegTargetCodeGenInfo : public TargetCodeGenInfo {
+public:
+  LegTargetCodeGenInfo(CodeGenTypes &CGT)
+      : TargetCodeGenInfo(new LegABIInfo(CGT)) {}
+};
+} // End anonymous namespace.
+
+//===----------------------------------------------------------------------===//
 // Driver code
 //===----------------------------------------------------------------------===//
 
@@ -5886,6 +5902,8 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
     return *(TheTargetCodeGenInfo = new SparcV9TargetCodeGenInfo(Types));
   case llvm::Triple::xcore:
     return *(TheTargetCodeGenInfo = new XCoreTargetCodeGenInfo(Types));
+  case llvm::Triple::leg:
+    return *(TheTargetCodeGenInfo = new LegTargetCodeGenInfo(Types));
 
   }
 }

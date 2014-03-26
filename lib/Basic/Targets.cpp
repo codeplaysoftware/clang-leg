@@ -5628,6 +5628,55 @@ const Builtin::Info XCoreTargetInfo::BuiltinInfo[] = {
 };
 } // end anonymous namespace.
 
+namespace {
+class LegTargetInfo : public TargetInfo {
+public:
+  LegTargetInfo(const llvm::Triple &Triple) : TargetInfo(Triple) {
+    BigEndian = false;
+    NoAsmVariants = true;
+    LongLongAlign = 32;
+    SuitableAlign = 32;
+    DoubleAlign = LongDoubleAlign = 32;
+    SizeType = UnsignedInt;
+    PtrDiffType = SignedInt;
+    IntPtrType = SignedInt;
+    WCharType = UnsignedChar;
+    WIntType = UnsignedInt;
+    UseZeroLengthBitfieldAlignment = true;
+    DescriptionString = "e-m:e-p:32:32-i1:8:32-i8:8:32-i16:16:32-i64:32"
+                        "-f64:32-a:0:32-n32";
+  }
+  void getTargetDefines(const LangOptions &Opts,
+                        MacroBuilder &Builder) const override { }
+  void getTargetBuiltins(const Builtin::Info *&Records,
+                         unsigned &NumRecords) const override { }
+  BuiltinVaListKind getBuiltinVaListKind() const override {
+    return TargetInfo::VoidPtrBuiltinVaList;
+  }
+  const char *getClobbers() const override {
+    return "";
+  }
+  void getGCCRegNames(const char * const *&Names,
+                      unsigned &NumNames) const override {
+    Names = NULL;
+    NumNames = 0;
+  }
+  void getGCCRegAliases(const GCCRegAlias *&Aliases,
+                        unsigned &NumAliases) const override {
+    Aliases = NULL;
+    NumAliases = 0;
+  }
+  bool validateAsmConstraint(const char *&Name,
+                             TargetInfo::ConstraintInfo &Info) const override {
+    return false;
+  }
+  int getEHDataRegisterNumber(unsigned RegNo) const override {
+    // R0=ExceptionPointerRegister R1=ExceptionSelectorRegister
+    return -1;
+  }
+};
+} // end anonymous namespace.
+
 
 //===----------------------------------------------------------------------===//
 // Driver code
@@ -5639,6 +5688,9 @@ static TargetInfo *AllocateTarget(const llvm::Triple &Triple) {
   switch (Triple.getArch()) {
   default:
     return NULL;
+
+  case llvm::Triple::leg:
+    return new LegTargetInfo(Triple);
 
   case llvm::Triple::xcore:
     return new XCoreTargetInfo(Triple);
