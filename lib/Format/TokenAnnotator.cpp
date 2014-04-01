@@ -44,6 +44,11 @@ private:
     ScopedContextCreator ContextCreator(*this, tok::less, 10);
     FormatToken *Left = CurrentToken->Previous;
     Contexts.back().IsExpression = false;
+    // If there's a template keyword before the opening angle bracket, this is a
+    // template parameter, not an argument.
+    Contexts.back().InTemplateArgument =
+        Left->Previous != NULL && Left->Previous->Tok.isNot(tok::kw_template);
+
     while (CurrentToken != NULL) {
       if (CurrentToken->is(tok::greater)) {
         Left->MatchingParen = CurrentToken;
@@ -62,7 +67,11 @@ private:
       // parameters.
       // FIXME: This is getting out of hand, write a decent parser.
       if (CurrentToken->Previous->isOneOf(tok::pipepipe, tok::ampamp) &&
-          (CurrentToken->Previous->Type == TT_BinaryOperator ||
+          ((CurrentToken->Previous->Type == TT_BinaryOperator &&
+            // Toplevel bool expressions do not make lots of sense;
+            // If we're on the top level, it contains only the base context and
+            // the context for the current opening angle bracket.
+            Contexts.size() > 2) ||
            Contexts[Contexts.size() - 2].IsExpression) &&
           Line.First->isNot(tok::kw_template))
         return false;
@@ -76,9 +85,6 @@ private:
   bool parseParens(bool LookForDecls = false) {
     if (CurrentToken == NULL)
       return false;
-    bool AfterCaret = Contexts.back().CaretFound;
-    Contexts.back().CaretFound = false;
-
     ScopedContextCreator ContextCreator(*this, tok::l_paren, 1);
 
     // FIXME: This is a bit of a hack. Do better.
@@ -98,8 +104,10 @@ private:
       }
     }
 
-    if (Left->Previous && Left->Previous->isOneOf(tok::kw_static_assert,
-                                                  tok::kw_if, tok::kw_while)) {
+    if (Left->Previous &&
+        (Left->Previous->isOneOf(tok::kw_static_assert, tok::kw_if,
+                                 tok::kw_while, tok::l_paren, tok::comma) ||
+         Left->Previous->Type == TT_BinaryOperator)) {
       // static_assert, if and while usually contain expressions.
       Contexts.back().IsExpression = true;
     } else if (Left->Previous && Left->Previous->is(tok::r_square) &&
@@ -107,11 +115,15 @@ private:
                Left->Previous->MatchingParen->Type == TT_LambdaLSquare) {
       // This is a parameter list of a lambda expression.
       Contexts.back().IsExpression = false;
-    } else if (AfterCaret) {
+    } else if (Contexts[Contexts.size() - 2].CaretFound) {
       // This is the parameter list of an ObjC block.
       Contexts.back().IsExpression = false;
     } else if (Left->Previous && Left->Previous->is(tok::kw___attribute)) {
       Left->Type = TT_AttributeParen;
+    } else if (Left->Previous && Left->Previous->IsForEachMacro) {
+      // The first argument to a foreach macro is a declaration.
+      Contexts.back().IsForEachMacro = true;
+      Contexts.back().IsExpression = false;
     }
 
     if (StartsObjCMethodExpr) {
@@ -271,6 +283,11 @@ private:
   bool parseBrace() {
     if (CurrentToken != NULL) {
       FormatToken *Left = CurrentToken->Previous;
+
+      if (Contexts.back().CaretFound)
+        Left->Type = TT_ObjCBlockLBrace;
+      Contexts.back().CaretFound = false;
+
       ScopedContextCreator ContextCreator(*this, tok::l_brace, 1);
       Contexts.back().ColonIsDictLiteral = true;
 
@@ -451,6 +468,8 @@ private:
         Contexts.back().FirstStartOfName->PartOfMultiVariableDeclStmt = true;
       if (Contexts.back().InCtorInitializer)
         Tok->Type = TT_CtorInitializerComma;
+      if (Contexts.back().IsForEachMacro)
+        Contexts.back().IsExpression = true;
       break;
     default:
       break;
@@ -611,7 +630,8 @@ private:
           ColonIsForRangeExpr(false), ColonIsDictLiteral(false),
           ColonIsObjCMethodExpr(false), FirstObjCSelectorName(NULL),
           FirstStartOfName(NULL), IsExpression(IsExpression),
-          CanBeExpression(true), InCtorInitializer(false), CaretFound(false) {}
+          CanBeExpression(true), InTemplateArgument(false),
+          InCtorInitializer(false), CaretFound(false), IsForEachMacro(false) {}
 
     tok::TokenKind ContextKind;
     unsigned BindingStrength;
@@ -624,8 +644,10 @@ private:
     FormatToken *FirstStartOfName;
     bool IsExpression;
     bool CanBeExpression;
+    bool InTemplateArgument;
     bool InCtorInitializer;
     bool CaretFound;
+    bool IsForEachMacro;
   };
 
   /// \brief Puts a new \c Context onto the stack \c Contexts for the lifetime
@@ -701,7 +723,8 @@ private:
       } else if (Current.isOneOf(tok::star, tok::amp, tok::ampamp)) {
         Current.Type =
             determineStarAmpUsage(Current, Contexts.back().CanBeExpression &&
-                                               Contexts.back().IsExpression);
+                                               Contexts.back().IsExpression,
+                                  Contexts.back().InTemplateArgument);
       } else if (Current.isOneOf(tok::minus, tok::plus, tok::caret)) {
         Current.Type = determinePlusMinusCaretUsage(Current);
         if (Current.Type == TT_UnaryOperator) {
@@ -817,7 +840,8 @@ private:
   }
 
   /// \brief Return the type of the given token assuming it is * or &.
-  TokenType determineStarAmpUsage(const FormatToken &Tok, bool IsExpression) {
+  TokenType determineStarAmpUsage(const FormatToken &Tok, bool IsExpression,
+                                  bool InTemplateArgument) {
     const FormatToken *PrevToken = Tok.getPreviousNonComment();
     if (PrevToken == NULL)
       return TT_UnaryOperator;
@@ -846,8 +870,15 @@ private:
       return TT_PointerOrReference;
 
     if (PrevToken->Tok.isLiteral() ||
-        PrevToken->isOneOf(tok::r_paren, tok::r_square) ||
-        NextToken->Tok.isLiteral() || NextToken->isUnaryOperator())
+        PrevToken->isOneOf(tok::r_paren, tok::r_square, tok::kw_true,
+                           tok::kw_false) ||
+        NextToken->Tok.isLiteral() ||
+        NextToken->isOneOf(tok::kw_true, tok::kw_false) ||
+        NextToken->isUnaryOperator() ||
+        // If we know we're in a template argument, there are no named
+        // declarations. Thus, having an identifier on the right-hand side
+        // indicates a binary operator.
+        (InTemplateArgument && NextToken->Tok.isAnyIdentifier()))
       return TT_BinaryOperator;
 
     // It is very unlikely that we are going to find a pointer or reference type
@@ -1384,8 +1415,9 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
            Left.isOneOf(tok::kw_return, tok::kw_new, tok::kw_delete,
                         tok::semi) ||
            (Style.SpaceBeforeParens != FormatStyle::SBPO_Never &&
-            Left.isOneOf(tok::kw_if, tok::kw_for, tok::kw_while, tok::kw_switch,
-                         tok::kw_catch)) ||
+            (Left.isOneOf(tok::kw_if, tok::kw_for, tok::kw_while,
+                          tok::kw_switch, tok::kw_catch) ||
+             Left.IsForEachMacro)) ||
            (Style.SpaceBeforeParens == FormatStyle::SBPO_Always &&
             Left.isOneOf(tok::identifier, tok::kw___attribute) &&
             Line.Type != LT_PreprocessorDirective);

@@ -31,17 +31,17 @@ __declspec(dllimport) int GlobalInit1 = 1; // expected-error{{definition of dlli
 int __declspec(dllimport) GlobalInit2 = 1; // expected-error{{definition of dllimport data}}
 
 // Declare, then reject definition.
-__declspec(dllimport) extern int ExternGlobalDeclInit;
-int ExternGlobalDeclInit = 1; // expected-error{{definition of dllimport data}}
+__declspec(dllimport) extern int ExternGlobalDeclInit; // expected-note{{previous declaration is here}} expected-note{{previous attribute is here}}
+int ExternGlobalDeclInit = 1; // expected-warning{{'ExternGlobalDeclInit' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
 
-__declspec(dllimport) int GlobalDeclInit;
-int GlobalDeclInit = 1; // expected-error{{definition of dllimport data}}
+__declspec(dllimport) int GlobalDeclInit; // expected-note{{previous declaration is here}} expected-note{{previous attribute is here}}
+int GlobalDeclInit = 1; // expected-warning{{'GlobalDeclInit' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
 
-int *__attribute__((dllimport)) GlobalDeclChunkAttrInit;
-int *GlobalDeclChunkAttrInit = 0; // expected-error{{definition of dllimport data}}
+int *__attribute__((dllimport)) GlobalDeclChunkAttrInit; // expected-note{{previous declaration is here}} expected-note{{previous attribute is here}}
+int *GlobalDeclChunkAttrInit = 0; // expected-warning{{'GlobalDeclChunkAttrInit' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
 
-int GlobalDeclAttrInit __attribute__((dllimport));
-int GlobalDeclAttrInit = 1; // expected-error{{definition of dllimport data}}
+int GlobalDeclAttrInit __attribute__((dllimport)); // expected-note{{previous declaration is here}} expected-note{{previous attribute is here}}
+int GlobalDeclAttrInit = 1; // expected-warning{{'GlobalDeclAttrInit' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
 
 // Redeclarations
 __declspec(dllimport) extern int GlobalRedecl1;
@@ -56,6 +56,17 @@ int *__attribute__((dllimport)) GlobalRedecl2b;
 int GlobalRedecl2c __attribute__((dllimport));
 int GlobalRedecl2c __attribute__((dllimport));
 
+// NB: MSVC issues a warning and makes GlobalRedecl3 dllexport. We follow GCC
+// and drop the dllimport with a warning.
+__declspec(dllimport) extern int GlobalRedecl3; // expected-note{{previous declaration is here}} expected-note{{previous attribute is here}}
+                      extern int GlobalRedecl3; // expected-warning{{'GlobalRedecl3' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
+
+                      extern int GlobalRedecl4; // expected-note{{previous declaration is here}}
+__declspec(dllimport) extern int GlobalRedecl4; // expected-error{{redeclaration of 'GlobalRedecl4' cannot add 'dllimport' attribute}}
+
+// External linkage is required.
+__declspec(dllimport) static int StaticGlobal; // expected-error{{'StaticGlobal' must have external linkage when declared 'dllimport'}}
+
 // Import in local scope.
 __declspec(dllimport) float LocalRedecl1; // expected-note{{previous definition is here}}
 __declspec(dllimport) float LocalRedecl2; // expected-note{{previous definition is here}}
@@ -69,6 +80,7 @@ void functionScope() {
   __declspec(dllimport)        int LocalVarDef = 1; // expected-error{{definition of dllimport data}}
   __declspec(dllimport) extern int ExternLocalVarDecl;
   __declspec(dllimport) extern int ExternLocalVarDef = 1; // expected-error{{definition of dllimport data}}
+  __declspec(dllimport) static int StaticLocalVar; // expected-error{{'StaticLocalVar' must have external linkage when declared 'dllimport'}}
 }
 
 
@@ -95,5 +107,16 @@ inline void __attribute__((dllimport)) inlineFunc2() {} // expected-warning{{'dl
 __declspec(dllimport) void redecl1();
 __declspec(dllimport) void redecl1();
 
-__declspec(dllimport) void redecl3();
+// NB: MSVC issues a warning and makes redecl2/redecl3 dllexport. We follow GCC
+// and drop the dllimport with a warning.
+__declspec(dllimport) void redecl2(); // expected-note{{previous declaration is here}} expected-note{{previous attribute is here}}
+                      void redecl2(); // expected-warning{{'redecl2' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
+
+__declspec(dllimport) void redecl3(); // expected-note{{previous declaration is here}} expected-note{{previous attribute is here}}
                       void redecl3() {} // expected-warning{{'redecl3' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
+
+                      void redecl4(); // expected-note{{previous declaration is here}}
+__declspec(dllimport) void redecl4(); // expected-error{{redeclaration of 'redecl4' cannot add 'dllimport' attribute}}
+
+// External linkage is required.
+__declspec(dllimport) static int staticFunc(); // expected-error{{'staticFunc' must have external linkage when declared 'dllimport'}}

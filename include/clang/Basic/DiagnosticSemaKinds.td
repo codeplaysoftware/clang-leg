@@ -373,6 +373,8 @@ def warn_unreachable_return : Warning<
 def warn_unreachable_loop_increment : Warning<
   "loop will run at most once (loop increment never executed)">,
   InGroup<UnreachableCodeLoopIncrement>, DefaultIgnore;
+def note_unreachable_silence : Note<
+  "silence by adding parentheses to mark code as explicitly dead">;
 
 /// Built-in functions.
 def ext_implicit_lib_function_decl : ExtWarn<
@@ -905,8 +907,9 @@ def warn_unimplemented_selector:  Warning<
 def warn_unimplemented_protocol_method : Warning<
   "method %0 in protocol %1 not implemented">, InGroup<Protocol>;
 def warning_multiple_selectors: Warning<
-  "several methods with selector %0 of mismatched types are found for the @selector expression">,
-  InGroup<SelectorTypeMismatch>;
+  "several methods with selector %0 of mismatched types are found "
+  "for the @selector expression">,
+  InGroup<SelectorTypeMismatch>, DefaultIgnore;
 // C++ declarations
 def err_static_assert_expression_is_not_constant : Error<
   "static_assert expression is not an integral constant expression">;
@@ -2071,9 +2074,13 @@ def err_attribute_weak_static : Error<
   "weak declaration cannot have internal linkage">;
 def err_attribute_selectany_non_extern_data : Error<
   "'selectany' can only be applied to data items with external linkage">;
+def err_attribute_dll_not_extern : Error<
+  "%q0 must have external linkage when declared %q1">;
 def warn_attribute_invalid_on_definition : Warning<
   "'%0' attribute cannot be specified on a definition">,
   InGroup<IgnoredAttributes>;
+def err_attribute_dll_redeclaration : Error<
+  "redeclaration of %q0 cannot add %q1 attribute">;
 def err_attribute_dllimport_data_definition : Error<
   "definition of dllimport data">;
 def err_attribute_weakref_not_static : Error<
@@ -2086,6 +2093,9 @@ def err_alias_not_supported_on_darwin : Error <
   "only weak aliases are supported on darwin">;
 def err_alias_to_undefined : Error<
   "alias must point to a defined variable or function">;
+def warn_alias_to_weak_alias : Warning<
+  "alias will always resolve to %0 even if weak definition of alias %1 is overridden">,
+  InGroup<IgnoredAttributes>;
 def err_duplicate_mangled_name : Error<
   "definition with same mangled name as another definition">;
 def err_cyclic_alias : Error<
@@ -2350,7 +2360,7 @@ def warn_impcast_floating_point_to_bool : Warning<
 def warn_impcast_pointer_to_bool : Warning<
     "address of%select{| function| array}0 '%1' will always evaluate to "
     "'true'">,
-    InGroup<BoolConversion>;
+    InGroup<PointerBoolConversion>;
 def warn_null_pointer_compare : Warning<
     "comparison of %select{address of|function|array}0 '%1' %select{not |}2"
     "equal to a null pointer is always %select{true|false}2">,
@@ -3708,6 +3718,8 @@ def warn_redefinition_of_typedef : ExtWarn<
 def err_redefinition_variably_modified_typedef : Error<
   "redefinition of %select{typedef|type alias}0 for variably-modified type %1">;
 
+def err_inline_decl_follows_def : Error<
+  "inline declaration of %0 follows non-inline definition">;
 def err_inline_declaration_block_scope : Error<
   "inline declaration of %0 not allowed in block scope">;
 def err_static_non_static : Error<
@@ -6375,7 +6387,7 @@ def warn_comparison_always : Warning<
 def warn_stringcompare : Warning<
   "result of comparison against %select{a string literal|@encode}0 is "
   "unspecified (use strncmp instead)">,
-  InGroup<DiagGroup<"string-compare">>;
+  InGroup<StringCompare>;
 
 def warn_identity_field_assign : Warning<
   "assigning %select{field|instance variable}0 to itself">,
@@ -6813,6 +6825,8 @@ def err_static_kernel : Error<
   "kernel functions cannot be declared static">;
 def err_opencl_ptrptr_kernel_param : Error<
   "kernel parameter cannot be declared as a pointer to a pointer">;
+def err_opencl_private_ptr_kernel_param : Error<
+  "kernel parameter cannot be declared as a pointer to the __private address space">;
 def err_static_function_scope : Error<
   "variables in function scope cannot be declared static">;
 def err_opencl_bitfields : Error<
@@ -6905,6 +6919,8 @@ def note_omp_conversion_here : Note<
 def err_omp_ambiguous_conversion : Error<
   "ambiguous conversion from type %0 to an integral or unscoped "
   "enumeration type">;
+def err_omp_required_access : Error<
+  "%0 variable must be %1">;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {
