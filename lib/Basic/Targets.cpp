@@ -5990,9 +5990,9 @@ const Builtin::Info XCoreTargetInfo::BuiltinInfo[] = {
 } // end anonymous namespace.
 
 namespace {
-class LegTargetInfo : public TargetInfo {
+class LEGTargetInfo : public TargetInfo {
 public:
-  LegTargetInfo(const llvm::Triple &Triple) : TargetInfo(Triple) {
+  LEGTargetInfo(const llvm::Triple &Triple) : TargetInfo(Triple) {
     BigEndian = false;
     NoAsmVariants = true;
     LongLongAlign = 32;
@@ -6051,7 +6051,7 @@ static TargetInfo *AllocateTarget(const llvm::Triple &Triple) {
     return NULL;
 
   case llvm::Triple::leg:
-    return new LegTargetInfo(Triple);
+    return new LEGTargetInfo(Triple);
 
   case llvm::Triple::arm64:
     if (Triple.isOSDarwin())

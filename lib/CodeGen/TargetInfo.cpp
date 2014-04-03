@@ -6116,18 +6116,18 @@ llvm::Value *XCoreABIInfo::EmitVAArg(llvm::Value *VAListAddr, QualType Ty,
 }
 
 //===----------------------------------------------------------------------===//
-// Leg ABI Implementation
+// LEG ABI Implementation
 //===----------------------------------------------------------------------===//
 namespace {
-class LegABIInfo : public DefaultABIInfo {
+class LEGABIInfo : public DefaultABIInfo {
 public:
-  LegABIInfo(CodeGen::CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
+  LEGABIInfo(CodeGen::CodeGenTypes &CGT) : DefaultABIInfo(CGT) {}
 };
 
-class LegTargetCodeGenInfo : public TargetCodeGenInfo {
+class LEGTargetCodeGenInfo : public TargetCodeGenInfo {
 public:
-  LegTargetCodeGenInfo(CodeGenTypes &CGT)
-      : TargetCodeGenInfo(new LegABIInfo(CGT)) {}
+  LEGTargetCodeGenInfo(CodeGenTypes &CGT)
+      : TargetCodeGenInfo(new LEGABIInfo(CGT)) {}
 };
 } // End anonymous namespace.
 
@@ -6257,7 +6257,7 @@ const TargetCodeGenInfo &CodeGenModule::getTargetCodeGenInfo() {
   case llvm::Triple::xcore:
     return *(TheTargetCodeGenInfo = new XCoreTargetCodeGenInfo(Types));
   case llvm::Triple::leg:
-    return *(TheTargetCodeGenInfo = new LegTargetCodeGenInfo(Types));
+    return *(TheTargetCodeGenInfo = new LEGTargetCodeGenInfo(Types));
 
   }
 }
