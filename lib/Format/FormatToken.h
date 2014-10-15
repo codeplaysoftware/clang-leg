@@ -13,8 +13,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_FORMAT_FORMAT_TOKEN_H
-#define LLVM_CLANG_FORMAT_FORMAT_TOKEN_H
+#ifndef LLVM_CLANG_LIB_FORMAT_FORMATTOKEN_H
+#define LLVM_CLANG_LIB_FORMAT_FORMATTOKEN_H
 
 #include "clang/Basic/OperatorPrecedence.h"
 #include "clang/Format/Format.h"
@@ -33,30 +33,35 @@ enum TokenType {
   TT_BlockComment,
   TT_CastRParen,
   TT_ConditionalExpr,
+  TT_ConflictAlternative,
+  TT_ConflictEnd,
+  TT_ConflictStart,
   TT_CtorInitializerColon,
   TT_CtorInitializerComma,
   TT_DesignatedInitializerPeriod,
   TT_DictLiteral,
-  TT_ImplicitStringLiteral,
-  TT_InlineASMColon,
-  TT_InheritanceColon,
+  TT_FunctionDeclarationName,
   TT_FunctionLBrace,
   TT_FunctionTypeLParen,
+  TT_ImplicitStringLiteral,
+  TT_InheritanceColon,
+  TT_InlineASMColon,
   TT_LambdaLSquare,
   TT_LineComment,
-  TT_ObjCBlockLParen,
   TT_ObjCBlockLBrace,
+  TT_ObjCBlockLParen,
   TT_ObjCDecl,
   TT_ObjCForIn,
   TT_ObjCMethodExpr,
   TT_ObjCMethodSpecifier,
   TT_ObjCProperty,
-  TT_ObjCSelectorName,
   TT_OverloadedOperator,
   TT_OverloadedOperatorLParen,
   TT_PointerOrReference,
   TT_PureVirtualSpecifier,
   TT_RangeBasedForLoopColon,
+  TT_RegexLiteral,
+  TT_SelectorName,
   TT_StartOfName,
   TT_TemplateCloser,
   TT_TemplateOpener,
@@ -99,12 +104,14 @@ struct FormatToken {
         IsFirst(false), MustBreakBefore(false), IsUnterminatedLiteral(false),
         BlockKind(BK_Unknown), Type(TT_Unknown), SpacesRequiredBefore(0),
         CanBreakBefore(false), ClosesTemplateDeclaration(false),
-        ParameterCount(0), PackingKind(PPK_Inconclusive), TotalLength(0),
-        UnbreakableTailLength(0), BindingStrength(0), NestingLevel(0),
-        SplitPenalty(0), LongestObjCSelectorName(0), FakeRParens(0),
+        ParameterCount(0), BlockParameterCount(0),
+        PackingKind(PPK_Inconclusive), TotalLength(0), UnbreakableTailLength(0),
+        BindingStrength(0), NestingLevel(0), SplitPenalty(0),
+        LongestObjCSelectorName(0), FakeRParens(0),
         StartsBinaryExpression(false), EndsBinaryExpression(false),
-        LastInChainOfCalls(false), PartOfMultiVariableDeclStmt(false),
-        IsForEachMacro(false), MatchingParen(NULL), Previous(NULL), Next(NULL),
+        OperatorIndex(0), LastOperator(false),
+        PartOfMultiVariableDeclStmt(false), IsForEachMacro(false),
+        MatchingParen(nullptr), Previous(nullptr), Next(nullptr),
         Decision(FD_Unformatted), Finalized(false) {}
 
   /// \brief The \c Token.
@@ -186,6 +193,10 @@ struct FormatToken {
   /// the number of commas.
   unsigned ParameterCount;
 
+  /// \brief Number of parameters that are nested blocks,
+  /// if this is "(", "[" or "<".
+  unsigned BlockParameterCount;
+
   /// \brief A token can have a special role that can carry extra information
   /// about the token's formatting.
   std::unique_ptr<TokenRole> Role;
@@ -239,8 +250,13 @@ struct FormatToken {
   /// \brief \c true if this token ends a binary expression.
   bool EndsBinaryExpression;
 
-  /// \brief Is this the last "." or "->" in a builder-type call?
-  bool LastInChainOfCalls;
+  /// \brief Is this is an operator (or "."/"->") in a sequence of operators
+  /// with the same precedence, contains the 0-based operator index.
+  unsigned OperatorIndex;
+
+  /// \brief Is this the last operator (or "."/"->") in a sequence of operators
+  /// with the same precedence?
+  bool LastOperator;
 
   /// \brief Is this token part of a \c DeclStmt defining multiple variables?
   ///
@@ -308,7 +324,7 @@ struct FormatToken {
 
   /// \brief Returns \c true if this is a "." or "->" accessing a member.
   bool isMemberAccess() const {
-    return isOneOf(tok::arrow, tok::period) &&
+    return isOneOf(tok::arrow, tok::period, tok::arrowstar) &&
            Type != TT_DesignatedInitializerPeriod;
   }
 
@@ -334,7 +350,28 @@ struct FormatToken {
   }
 
   bool isTrailingComment() const {
-    return is(tok::comment) && (!Next || Next->NewlinesBefore > 0);
+    return is(tok::comment) &&
+           (Type == TT_LineComment || !Next || Next->NewlinesBefore > 0);
+  }
+
+  /// \brief Returns \c true if this is a keyword that can be used
+  /// like a function call (e.g. sizeof, typeid, ...).
+  bool isFunctionLikeKeyword() const {
+    switch (Tok.getKind()) {
+    case tok::kw_throw:
+    case tok::kw_typeid:
+    case tok::kw_return:
+    case tok::kw_sizeof:
+    case tok::kw_alignof:
+    case tok::kw_alignas:
+    case tok::kw_decltype:
+    case tok::kw_noexcept:
+    case tok::kw_static_assert:
+    case tok::kw___attribute:
+      return true;
+    default:
+      return false;
+    }
   }
 
   prec::Level getPrecedence() const {
@@ -344,7 +381,7 @@ struct FormatToken {
   /// \brief Returns the previous token ignoring comments.
   FormatToken *getPreviousNonComment() const {
     FormatToken *Tok = Previous;
-    while (Tok != NULL && Tok->is(tok::comment))
+    while (Tok && Tok->is(tok::comment))
       Tok = Tok->Previous;
     return Tok;
   }
@@ -352,7 +389,7 @@ struct FormatToken {
   /// \brief Returns the next token ignoring comments.
   const FormatToken *getNextNonComment() const {
     const FormatToken *Tok = Next;
-    while (Tok != NULL && Tok->is(tok::comment))
+    while (Tok && Tok->is(tok::comment))
       Tok = Tok->Next;
     return Tok;
   }
@@ -445,7 +482,9 @@ public:
                            bool DryRun) override;
 
   /// \brief Adds \p Token as the next comma to the \c CommaSeparated list.
-  void CommaFound(const FormatToken *Token) override { Commas.push_back(Token);}
+  void CommaFound(const FormatToken *Token) override {
+    Commas.push_back(Token);
+  }
 
 private:
   /// \brief A struct that holds information on how to format a given list with
@@ -484,4 +523,4 @@ private:
 } // namespace format
 } // namespace clang
 
-#endif // LLVM_CLANG_FORMAT_FORMAT_TOKEN_H
+#endif

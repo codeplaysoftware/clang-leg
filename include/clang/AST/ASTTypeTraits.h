@@ -13,8 +13,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_AST_AST_TYPE_TRAITS_H
-#define LLVM_CLANG_AST_AST_TYPE_TRAITS_H
+#ifndef LLVM_CLANG_AST_ASTTYPETRAITS_H
+#define LLVM_CLANG_AST_ASTTYPETRAITS_H
 
 #include "clang/AST/ASTFwd.h"
 #include "clang/AST/Decl.h"
@@ -53,13 +53,23 @@ public:
     return ASTNodeKind(KindToKindId<T>::Id);
   }
 
+  /// \{
+  /// \brief Construct an identifier for the dynamic type of the node
+  static ASTNodeKind getFromNode(const Decl &D);
+  static ASTNodeKind getFromNode(const Stmt &S);
+  static ASTNodeKind getFromNode(const Type &T);
+  /// \}
+
   /// \brief Returns \c true if \c this and \c Other represent the same kind.
   bool isSame(ASTNodeKind Other) const;
+
+  /// \brief Returns \c true only for the default \c ASTNodeKind()
+  bool isNone() const { return KindId == NKI_None; }
 
   /// \brief Returns \c true if \c this is a base kind of (or same as) \c Other.
   /// \param Distance If non-null, used to return the distance between \c this
   /// and \c Other in the class hierarchy.
-  bool isBaseOf(ASTNodeKind Other, unsigned *Distance = 0) const;
+  bool isBaseOf(ASTNodeKind Other, unsigned *Distance = nullptr) const;
 
   /// \brief String representation of the kind.
   StringRef asStringRef() const;
@@ -68,6 +78,17 @@ public:
   bool operator<(const ASTNodeKind &Other) const {
     return KindId < Other.KindId;
   }
+
+  /// \brief Return the most derived type between \p Kind1 and \p Kind2.
+  ///
+  /// Return ASTNodeKind() if they are not related.
+  static ASTNodeKind getMostDerivedType(ASTNodeKind Kind1, ASTNodeKind Kind2);
+
+  /// \brief Return the most derived common ancestor between Kind1 and Kind2.
+  ///
+  /// Return ASTNodeKind() if they are not related.
+  static ASTNodeKind getMostDerivedCommonAncestor(ASTNodeKind Kind1,
+                                                  ASTNodeKind Kind2);
 
 private:
   /// \brief Kind ids.
@@ -184,12 +205,14 @@ public:
     return BaseConverter<T>::get(NodeKind, Storage.buffer);
   }
 
+  ASTNodeKind getNodeKind() const { return NodeKind; }
+
   /// \brief Returns a pointer that identifies the stored AST node.
   ///
   /// Note that this is not supported by all AST nodes. For AST nodes
   /// that don't have a pointer-defined identity inside the AST, this
   /// method returns NULL.
-  const void *getMemoizationData() const;
+  const void *getMemoizationData() const { return MemoizationData; }
 
   /// \brief Prints the node to the given output stream.
   void print(llvm::raw_ostream &OS, const PrintingPolicy &PP) const;
@@ -237,11 +260,12 @@ private:
     static const T *get(ASTNodeKind NodeKind, const char Storage[]) {
       if (ASTNodeKind::getFromNodeKind<BaseT>().isBaseOf(NodeKind))
         return dyn_cast<T>(*reinterpret_cast<BaseT *const *>(Storage));
-      return NULL;
+      return nullptr;
     }
     static DynTypedNode create(const BaseT &Node) {
       DynTypedNode Result;
-      Result.NodeKind = ASTNodeKind::getFromNodeKind<T>();
+      Result.NodeKind = ASTNodeKind::getFromNode(Node);
+      Result.MemoizationData = &Node;
       new (Result.Storage.buffer) const BaseT * (&Node);
       return Result;
     }
@@ -252,11 +276,12 @@ private:
     static const T *get(ASTNodeKind NodeKind, const char Storage[]) {
       if (ASTNodeKind::getFromNodeKind<T>().isSame(NodeKind))
         return *reinterpret_cast<T *const *>(Storage);
-      return NULL;
+      return nullptr;
     }
     static DynTypedNode create(const T &Node) {
       DynTypedNode Result;
       Result.NodeKind = ASTNodeKind::getFromNodeKind<T>();
+      Result.MemoizationData = &Node;
       new (Result.Storage.buffer) const T * (&Node);
       return Result;
     }
@@ -267,17 +292,19 @@ private:
     static const T *get(ASTNodeKind NodeKind, const char Storage[]) {
       if (ASTNodeKind::getFromNodeKind<T>().isSame(NodeKind))
         return reinterpret_cast<const T *>(Storage);
-      return NULL;
+      return nullptr;
     }
     static DynTypedNode create(const T &Node) {
       DynTypedNode Result;
       Result.NodeKind = ASTNodeKind::getFromNodeKind<T>();
+      Result.MemoizationData = nullptr;
       new (Result.Storage.buffer) T(Node);
       return Result;
     }
   };
 
   ASTNodeKind NodeKind;
+  const void *MemoizationData;
 
   /// \brief Stores the data of the node.
   ///
@@ -345,20 +372,7 @@ template <typename T, typename EnablerT> struct DynTypedNode::BaseConverter {
   }
 };
 
-inline const void *DynTypedNode::getMemoizationData() const {
-  if (ASTNodeKind::getFromNodeKind<Decl>().isBaseOf(NodeKind)) {
-    return BaseConverter<Decl>::get(NodeKind, Storage.buffer);
-  } else if (ASTNodeKind::getFromNodeKind<Stmt>().isBaseOf(NodeKind)) {
-    return BaseConverter<Stmt>::get(NodeKind, Storage.buffer);
-  } else if (ASTNodeKind::getFromNodeKind<Type>().isBaseOf(NodeKind)) {
-    return BaseConverter<Type>::get(NodeKind, Storage.buffer);
-  } else if (ASTNodeKind::getFromNodeKind<NestedNameSpecifier>().isBaseOf(NodeKind)) {
-    return BaseConverter<NestedNameSpecifier>::get(NodeKind, Storage.buffer);
-  }
-  return NULL;
-}
-
 } // end namespace ast_type_traits
 } // end namespace clang
 
-#endif // LLVM_CLANG_AST_AST_TYPE_TRAITS_H
+#endif

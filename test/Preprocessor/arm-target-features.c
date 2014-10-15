@@ -3,18 +3,24 @@
 // CHECK: __ARM_ARCH 8
 // CHECK: __ARM_ARCH_8A__ 1
 // CHECK: __ARM_FEATURE_CRC32 1
+// CHECK: __ARM_FEATURE_DIRECTED_ROUNDING 1
+// CHECK: __ARM_FEATURE_NUMERIC_MAXMIN 1
 
 // RUN: %clang -target armv7a-none-linux-gnu -x c -E -dM %s -o - | FileCheck --check-prefix=CHECK-V7 %s
 // CHECK-V7: __ARMEL__ 1
 // CHECK-V7: __ARM_ARCH 7
 // CHECK-V7: __ARM_ARCH_7A__ 1
 // CHECK-V7-NOT: __ARM_FEATURE_CRC32
+// CHECK-V7-NOT: __ARM_FEATURE_NUMERIC_MAXMIN                                   
+// CHECK-V7-NOT: __ARM_FEATURE_DIRECTED_ROUNDING
 
 // RUN: %clang -target armv8a -mfloat-abi=hard -x c -E -dM %s | FileCheck --check-prefix=CHECK-V8-BAREHF %s
 // CHECK-V8-BAREHF: __ARMEL__ 1
 // CHECK-V8-BAREHF: __ARM_ARCH 8
 // CHECK-V8-BAREHF: __ARM_ARCH_8A__ 1
 // CHECK-V8-BAREHF: __ARM_FEATURE_CRC32 1
+// CHECK-V8-BAREHF: __ARM_FEATURE_DIRECTED_ROUNDING 1
+// CHECK-V8-BAREHF: __ARM_FEATURE_NUMERIC_MAXMIN 1
 // CHECK-V8-BAREHF: __ARM_NEON__ 1
 // CHECK-V8-BAREHF: __VFP_FP__ 1
 
@@ -148,7 +154,9 @@
 // RUN: %clang -target armv7 -mthumb -mcpu=cortex-a5 -x c -E -dM %s -o - | FileCheck --check-prefix=A5 %s
 // A5:#define __ARM_ARCH 7
 // A5:#define __ARM_ARCH_7A__ 1
-// A5:#define __ARM_ARCH_PROFILE A
+// A5:#define __ARM_ARCH_PROFILE 'A'
+// A5-NOT: #define __ARM_FEATURE_NUMERIC_MAXMIN
+// A5-NOT: #define __ARM_FEATURE_DIRECTED_ROUNDING
 
 // Test whether predefines are as expected when targeting cortex-a7.
 // RUN: %clang -target armv7 -mcpu=cortex-a7 -x c -E -dM %s -o - | FileCheck --check-prefix=A7 %s
@@ -156,7 +164,7 @@
 // A7:#define __ARM_ARCH 7
 // A7:#define __ARM_ARCH_7A__ 1
 // A7:#define __ARM_ARCH_EXT_IDIV__ 1
-// A7:#define __ARM_ARCH_PROFILE A
+// A7:#define __ARM_ARCH_PROFILE 'A'
 
 // Test whether predefines are as expected when targeting cortex-a8.
 // RUN: %clang -target armv7 -mcpu=cortex-a8 -x c -E -dM %s -o - | FileCheck --check-prefix=A8-ARM %s
@@ -190,7 +198,7 @@
 // A12:#define __ARM_ARCH 7
 // A12:#define __ARM_ARCH_7A__ 1
 // A12:#define __ARM_ARCH_EXT_IDIV__ 1
-// A12:#define __ARM_ARCH_PROFILE A
+// A12:#define __ARM_ARCH_PROFILE 'A'
 
 // Test whether predefines are as expected when targeting cortex-a15.
 // RUN: %clang -target armv7 -mcpu=cortex-a15 -x c -E -dM %s -o - | FileCheck --check-prefix=A15-ARM %s
@@ -198,6 +206,25 @@
 
 // RUN: %clang -target armv7 -mthumb -mcpu=cortex-a15 -x c -E -dM %s -o - | FileCheck --check-prefix=A15-THUMB %s
 // A15-THUMB:#define __ARM_ARCH_EXT_IDIV__ 1
+
+// Check that -mfpu works properly for Cortex-A17 (enabled by default).
+// RUN: %clang -target armv7-none-linux-gnueabi -mcpu=cortex-a17 -x c -E -dM %s -o - | FileCheck --check-prefix=DEFAULTFPU-A17 %s
+// RUN: %clang -target armv7-none-linux-gnueabi -mthumb -mcpu=cortex-a17 -x c -E -dM %s -o - | FileCheck --check-prefix=DEFAULTFPU-A17 %s
+// DEFAULTFPU-A17:#define __ARM_NEON__ 1
+// DEFAULTFPU-A17:#define __ARM_VFPV4__ 1
+
+// RUN: %clang -target armv7-none-linux-gnueabi -mcpu=cortex-a17 -mfpu=none -x c -E -dM %s -o - | FileCheck --check-prefix=FPUNONE-A17 %s
+// RUN: %clang -target armv7-none-linux-gnueabi -mthumb -mcpu=cortex-a17 -mfpu=none -x c -E -dM %s -o - | FileCheck --check-prefix=FPUNONE-A17 %s
+// FPUNONE-A17-NOT:#define __ARM_NEON__ 1
+// FPUNONE-A17-NOT:#define __ARM_VFPV4__ 1
+
+// Test whether predefines are as expected when targeting cortex-a17.
+// RUN: %clang -target armv7 -mcpu=cortex-a17 -x c -E -dM %s -o - | FileCheck --check-prefix=A17 %s
+// RUN: %clang -target armv7 -mthumb -mcpu=cortex-a17 -x c -E -dM %s -o - | FileCheck --check-prefix=A17 %s
+// A17:#define __ARM_ARCH 7
+// A17:#define __ARM_ARCH_7A__ 1
+// A17:#define __ARM_ARCH_EXT_IDIV__ 1
+// A17:#define __ARM_ARCH_PROFILE 'A'
 
 // Test whether predefines are as expected when targeting swift.
 // RUN: %clang -target armv7s -mcpu=swift -x c -E -dM %s -o - | FileCheck --check-prefix=SWIFT-ARM %s
@@ -231,6 +258,10 @@
 // Test whether predefines are as expected when targeting cortex-m4.
 // RUN: %clang -target armv7 -mthumb -mcpu=cortex-m4 -x c -E -dM %s -o - | FileCheck --check-prefix=M4-THUMB %s
 // M4-THUMB:#define __ARM_ARCH_EXT_IDIV__ 1
+
+// Test whether predefines are as expected when targeting cortex-m7.
+// RUN: %clang -target armv7 -mthumb -mcpu=cortex-m7 -x c -E -dM %s -o - | FileCheck --check-prefix=M7-THUMB %s
+// M7-THUMB:#define __ARM_ARCH_EXT_IDIV__ 1
 
 // Test whether predefines are as expected when targeting krait.
 // RUN: %clang -target armv7 -mcpu=krait -x c -E -dM %s -o - | FileCheck --check-prefix=KRAIT-ARM %s

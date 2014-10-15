@@ -15,7 +15,7 @@
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Transforms/Utils/SpecialCaseList.h"
+#include "llvm/Support/SpecialCaseList.h"
 #include <memory>
 
 using namespace clang::driver;
@@ -25,13 +25,11 @@ void SanitizerArgs::clear() {
   Kind = 0;
   BlacklistFile = "";
   MsanTrackOrigins = 0;
+  AsanFieldPadding = 0;
   AsanZeroBaseShadow = false;
   UbsanTrapOnError = false;
   AsanSharedRuntime = false;
-}
-
-SanitizerArgs::SanitizerArgs() {
-  clear();
+  LinkCXXRuntimes = false;
 }
 
 SanitizerArgs::SanitizerArgs(const ToolChain &TC,
@@ -113,14 +111,6 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
   // -f(-no)sanitize=leak should change whether leak detection is enabled by
   // default in ASan?
 
-  // If -fsanitize contains extra features of ASan, it should also
-  // explicitly contain -fsanitize=address (probably, turned off later in the
-  // command line).
-  if ((Kind & AddressFull) != 0 && (AllAdd & Address) == 0)
-    D.Diag(diag::warn_drv_unused_sanitizer)
-     << lastArgumentForKind(D, Args, AddressFull)
-     << "-fsanitize=address";
-
   // Parse -f(no-)sanitize-blacklist options.
   if (Arg *BLArg = Args.getLastArg(options::OPT_fsanitize_blacklist,
                                    options::OPT_fno_sanitize_blacklist)) {
@@ -171,11 +161,39 @@ SanitizerArgs::SanitizerArgs(const ToolChain &TC,
 
   if (NeedsAsan) {
     AsanSharedRuntime =
-      (TC.getTriple().getEnvironment() == llvm::Triple::Android) ||
-      Args.hasArg(options::OPT_shared_libasan);
+        Args.hasArg(options::OPT_shared_libasan) ||
+        (TC.getTriple().getEnvironment() == llvm::Triple::Android);
     AsanZeroBaseShadow =
         (TC.getTriple().getEnvironment() == llvm::Triple::Android);
+    if (Arg *A =
+            Args.getLastArg(options::OPT_fsanitize_address_field_padding)) {
+        StringRef S = A->getValue();
+        // Legal values are 0 and 1, 2, but in future we may add more levels.
+        if (S.getAsInteger(0, AsanFieldPadding) || AsanFieldPadding < 0 ||
+            AsanFieldPadding > 2) {
+          D.Diag(diag::err_drv_invalid_value) << A->getAsString(Args) << S;
+        }
+    }
+
+    if (Arg *WindowsDebugRTArg =
+            Args.getLastArg(options::OPT__SLASH_MTd, options::OPT__SLASH_MT,
+                            options::OPT__SLASH_MDd, options::OPT__SLASH_MD,
+                            options::OPT__SLASH_LDd, options::OPT__SLASH_LD)) {
+      switch (WindowsDebugRTArg->getOption().getID()) {
+      case options::OPT__SLASH_MTd:
+      case options::OPT__SLASH_MDd:
+      case options::OPT__SLASH_LDd:
+        D.Diag(diag::err_drv_argument_not_allowed_with)
+            << WindowsDebugRTArg->getAsString(Args)
+            << lastArgumentForKind(D, Args, NeedsAsanRt);
+        D.Diag(diag::note_drv_address_sanitizer_debug_runtime);
+      }
+    }
   }
+
+  // Parse -link-cxx-sanitizer flag.
+  LinkCXXRuntimes =
+      Args.hasArg(options::OPT_fsanitize_link_cxx_runtime) || D.CCCIsCXX();
 }
 
 void SanitizerArgs::addArgs(const llvm::opt::ArgList &Args,
@@ -198,7 +216,9 @@ void SanitizerArgs::addArgs(const llvm::opt::ArgList &Args,
   if (MsanTrackOrigins)
     CmdArgs.push_back(Args.MakeArgString("-fsanitize-memory-track-origins=" +
                                          llvm::utostr(MsanTrackOrigins)));
-
+  if (AsanFieldPadding)
+    CmdArgs.push_back(Args.MakeArgString("-fsanitize-address-field-padding=" +
+                                         llvm::utostr(AsanFieldPadding)));
   // Workaround for PR16386.
   if (needsMsanRt())
     CmdArgs.push_back(Args.MakeArgString("-fno-assume-sane-operator-new"));
@@ -210,11 +230,6 @@ unsigned SanitizerArgs::parse(const char *Value) {
 #define SANITIZER_GROUP(NAME, ID, ALIAS) .Case(NAME, ID##Group)
 #include "clang/Basic/Sanitizers.def"
     .Default(SanitizeKind());
-  // Assume -fsanitize=address implies -fsanitize=init-order,use-after-return.
-  // FIXME: This should be either specified in Sanitizers.def, or go away when
-  // we get rid of "-fsanitize=init-order,use-after-return" flags at all.
-  if (ParsedKind & Address)
-    ParsedKind |= InitOrder | UseAfterReturn;
   return ParsedKind;
 }
 
@@ -331,7 +346,7 @@ std::string SanitizerArgs::describeSanitizeArg(const llvm::opt::ArgList &Args,
 
 bool SanitizerArgs::getDefaultBlacklistForKind(const Driver &D, unsigned Kind,
                                                std::string &BLPath) {
-  const char *BlacklistFile = 0;
+  const char *BlacklistFile = nullptr;
   if (Kind & NeedsAsanRt)
     BlacklistFile = "asan_blacklist.txt";
   else if (Kind & NeedsMsanRt)

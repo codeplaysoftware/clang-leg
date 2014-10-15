@@ -155,11 +155,11 @@ namespace  {
       const Decl *Prev;
       bool PrevRef;
     public:
-      ChildDumper(ASTDumper &Dumper) : Dumper(Dumper), Prev(0) {}
+      ChildDumper(ASTDumper &Dumper) : Dumper(Dumper), Prev(nullptr) {}
       ~ChildDumper() {
         if (Prev) {
           Dumper.lastChild();
-          dump(0);
+          dump(nullptr);
         }
       }
 
@@ -178,14 +178,14 @@ namespace  {
 
       // Give up ownership of the children of the node. By calling this,
       // the caller takes back responsibility for calling lastChild().
-      void release() { dump(0); }
+      void release() { dump(nullptr); }
     };
 
   public:
     ASTDumper(raw_ostream &OS, const CommandTraits *Traits,
               const SourceManager *SM)
       : OS(OS), Traits(Traits), SM(SM), IsFirstLine(true), MoreChildren(false),
-        LastLocFilename(""), LastLocLine(~0U), FC(0),
+        LastLocFilename(""), LastLocLine(~0U), FC(nullptr),
         ShowColors(SM && SM->getDiagnostics().getShowColors()) { }
 
     ASTDumper(raw_ostream &OS, const CommandTraits *Traits,
@@ -216,11 +216,11 @@ namespace  {
     void dumpBareType(QualType T);
     void dumpType(QualType T);
     void dumpBareDeclRef(const Decl *Node);
-    void dumpDeclRef(const Decl *Node, const char *Label = 0);
+    void dumpDeclRef(const Decl *Node, const char *Label = nullptr);
     void dumpName(const NamedDecl *D);
     bool hasNodes(const DeclContext *DC);
     void dumpDeclContext(const DeclContext *DC);
-    void dumpLookups(const DeclContext *DC);
+    void dumpLookups(const DeclContext *DC, bool DumpDecls);
     void dumpAttr(const Attr *A);
 
     // C++ Utilities
@@ -315,6 +315,7 @@ namespace  {
     void VisitIntegerLiteral(const IntegerLiteral *Node);
     void VisitFloatingLiteral(const FloatingLiteral *Node);
     void VisitStringLiteral(const StringLiteral *Str);
+    void VisitInitListExpr(const InitListExpr *ILE);
     void VisitUnaryOperator(const UnaryOperator *Node);
     void VisitUnaryExprOrTypeTraitExpr(const UnaryExprOrTypeTraitExpr *Node);
     void VisitMemberExpr(const MemberExpr *Node);
@@ -444,6 +445,9 @@ void ASTDumper::dumpPointer(const void *Ptr) {
 }
 
 void ASTDumper::dumpLocation(SourceLocation Loc) {
+  if (!SM)
+    return;
+
   ColorScope Color(*this, LocationColor);
   SourceLocation SpellingLoc = SM->getSpellingLoc(Loc);
 
@@ -565,7 +569,7 @@ void ASTDumper::dumpDeclContext(const DeclContext *DC) {
   }
 }
 
-void ASTDumper::dumpLookups(const DeclContext *DC) {
+void ASTDumper::dumpLookups(const DeclContext *DC, bool DumpDecls) {
   IndentScope Indent(*this);
 
   OS << "StoredDeclsMap ";
@@ -598,9 +602,26 @@ void ASTDumper::dumpLookups(const DeclContext *DC) {
          RI != RE; ++RI) {
       if (RI + 1 == RE)
         lastChild();
-      dumpDeclRef(*RI);
+
+      IndentScope LookupIndent(*this);
+      dumpBareDeclRef(*RI);
+
       if ((*RI)->isHidden())
         OS << " hidden";
+
+      // If requested, dump the redecl chain for this lookup.
+      if (DumpDecls) {
+        // Dump earliest decl first.
+        std::function<void(Decl*)> DumpPrev = [&](Decl *D) {
+          if (Decl *Prev = D->getPreviousDecl()) {
+            DumpPrev(Prev);
+            dumpDecl(Prev);
+          }
+        };
+        DumpPrev(*RI);
+        lastChild();
+        dumpDecl(*RI);
+      }
     }
   }
 
@@ -626,9 +647,11 @@ void ASTDumper::dumpAttr(const Attr *A) {
   }
   dumpPointer(A);
   dumpSourceRange(A->getRange());
-#include "clang/AST/AttrDump.inc"
+  if (A->isInherited())
+    OS << " Inherited";
   if (A->isImplicit())
     OS << " Implicit";
+#include "clang/AST/AttrDump.inc"
 }
 
 static void dumpPreviousDeclImpl(raw_ostream &OS, ...) {}
@@ -686,8 +709,12 @@ void ASTDumper::dumpCXXCtorInitializer(const CXXCtorInitializer *Init) {
   if (Init->isAnyMemberInitializer()) {
     OS << ' ';
     dumpBareDeclRef(Init->getAnyMember());
-  } else {
+  } else if (Init->isBaseInitializer()) {
     dumpType(QualType(Init->getBaseClass(), 0));
+  } else if (Init->isDelegatingInitializer()) {
+    dumpType(Init->getTypeSourceInfo()->getType());
+  } else {
+    llvm_unreachable("Unknown initializer type");
   }
   dumpStmt(Init->getInit());
 }
@@ -792,11 +819,21 @@ void ASTDumper::dumpDecl(const Decl *D) {
     OS << " parent " << cast<Decl>(D->getDeclContext());
   dumpPreviousDecl(OS, D);
   dumpSourceRange(D->getSourceRange());
+  OS << ' ';
+  dumpLocation(D->getLocation());
   if (Module *M = D->getOwningModule())
     OS << " in " << M->getFullModuleName();
   if (const NamedDecl *ND = dyn_cast<NamedDecl>(D))
     if (ND->isHidden())
       OS << " hidden";
+  if (D->isImplicit())
+    OS << " implicit";
+  if (D->isUsed())
+    OS << " used";
+  else if (D->isThisDeclarationReferenced())
+    OS << " referenced";
+  if (D->isInvalidDecl())
+    OS << " invalid";
 
   bool HasAttrs = D->hasAttrs();
   const FullComment *Comment =
@@ -819,9 +856,6 @@ void ASTDumper::dumpDecl(const Decl *D) {
   setMoreChildren(HasDeclContext);
   lastChild();
   dumpFullComment(Comment);
-
-  if (D->isInvalidDecl())
-    OS << " invalid";
 
   setMoreChildren(false);
   if (HasDeclContext)
@@ -901,13 +935,13 @@ void ASTDumper::VisitFunctionDecl(const FunctionDecl *D) {
 
   if (const FunctionProtoType *FPT = D->getType()->getAs<FunctionProtoType>()) {
     FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
-    switch (EPI.ExceptionSpecType) {
+    switch (EPI.ExceptionSpec.Type) {
     default: break;
     case EST_Unevaluated:
-      OS << " noexcept-unevaluated " << EPI.ExceptionSpecDecl;
+      OS << " noexcept-unevaluated " << EPI.ExceptionSpec.SourceDecl;
       break;
     case EST_Uninstantiated:
-      OS << " noexcept-uninstantiated " << EPI.ExceptionSpecTemplate;
+      OS << " noexcept-uninstantiated " << EPI.ExceptionSpec.SourceTemplate;
       break;
     }
   }
@@ -1011,6 +1045,11 @@ void ASTDumper::VisitVarDecl(const VarDecl *D) {
   if (D->isNRVOVariable())
     OS << " nrvo";
   if (D->hasInit()) {
+    switch (D->getInitStyle()) {
+    case VarDecl::CInit: OS << " cinit"; break;
+    case VarDecl::CallInit: OS << " callinit"; break;
+    case VarDecl::ListInit: OS << " listinit"; break;
+    }
     lastChild();
     dumpStmt(D->getInit());
   }
@@ -1675,14 +1714,7 @@ void ASTDumper::VisitObjCIvarRefExpr(const ObjCIvarRefExpr *Node) {
 
 void ASTDumper::VisitPredefinedExpr(const PredefinedExpr *Node) {
   VisitExpr(Node);
-  switch (Node->getIdentType()) {
-  default: llvm_unreachable("unknown case");
-  case PredefinedExpr::Func:           OS <<  " __func__"; break;
-  case PredefinedExpr::Function:       OS <<  " __FUNCTION__"; break;
-  case PredefinedExpr::FuncDName:      OS <<  " __FUNCDNAME__"; break;
-  case PredefinedExpr::LFunction:      OS <<  " L__FUNCTION__"; break;
-  case PredefinedExpr::PrettyFunction: OS <<  " __PRETTY_FUNCTION__";break;
-  }
+  OS << " " << PredefinedExpr::getIdentTypeName(Node->getIdentType());
 }
 
 void ASTDumper::VisitCharacterLiteral(const CharacterLiteral *Node) {
@@ -1710,6 +1742,22 @@ void ASTDumper::VisitStringLiteral(const StringLiteral *Str) {
   ColorScope Color(*this, ValueColor);
   OS << " ";
   Str->outputString(OS);
+}
+
+void ASTDumper::VisitInitListExpr(const InitListExpr *ILE) {
+  VisitExpr(ILE);
+  if (auto *Filler = ILE->getArrayFiller()) {
+    if (!ILE->getNumInits())
+      lastChild();
+    IndentScope Indent(*this);
+    OS << "array filler";
+    lastChild();
+    dumpStmt(Filler);
+  }
+  if (auto *Field = ILE->getInitializedFieldInUnion()) {
+    OS << " field ";
+    dumpBareDeclRef(Field);
+  }
 }
 
 void ASTDumper::VisitUnaryOperator(const UnaryOperator *Node) {
@@ -1985,7 +2033,7 @@ void ASTDumper::dumpFullComment(const FullComment *C) {
 
   FC = C;
   dumpComment(C);
-  FC = 0;
+  FC = nullptr;
 }
 
 void ASTDumper::dumpComment(const Comment *C) {
@@ -2134,13 +2182,14 @@ LLVM_DUMP_METHOD void DeclContext::dumpLookups() const {
   dumpLookups(llvm::errs());
 }
 
-LLVM_DUMP_METHOD void DeclContext::dumpLookups(raw_ostream &OS) const {
+LLVM_DUMP_METHOD void DeclContext::dumpLookups(raw_ostream &OS,
+                                               bool DumpDecls) const {
   const DeclContext *DC = this;
   while (!DC->isTranslationUnit())
     DC = DC->getParent();
   ASTContext &Ctx = cast<TranslationUnitDecl>(DC)->getASTContext();
   ASTDumper P(OS, &Ctx.getCommentCommandTraits(), &Ctx.getSourceManager());
-  P.dumpLookups(this);
+  P.dumpLookups(this, DumpDecls);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2152,17 +2201,17 @@ LLVM_DUMP_METHOD void Stmt::dump(SourceManager &SM) const {
 }
 
 LLVM_DUMP_METHOD void Stmt::dump(raw_ostream &OS, SourceManager &SM) const {
-  ASTDumper P(OS, 0, &SM);
+  ASTDumper P(OS, nullptr, &SM);
   P.dumpStmt(this);
 }
 
 LLVM_DUMP_METHOD void Stmt::dump() const {
-  ASTDumper P(llvm::errs(), 0, 0);
+  ASTDumper P(llvm::errs(), nullptr, nullptr);
   P.dumpStmt(this);
 }
 
 LLVM_DUMP_METHOD void Stmt::dumpColor() const {
-  ASTDumper P(llvm::errs(), 0, 0, /*ShowColors*/true);
+  ASTDumper P(llvm::errs(), nullptr, nullptr, /*ShowColors*/true);
   P.dumpStmt(this);
 }
 
@@ -2170,7 +2219,9 @@ LLVM_DUMP_METHOD void Stmt::dumpColor() const {
 // Comment method implementations
 //===----------------------------------------------------------------------===//
 
-LLVM_DUMP_METHOD void Comment::dump() const { dump(llvm::errs(), 0, 0); }
+LLVM_DUMP_METHOD void Comment::dump() const {
+  dump(llvm::errs(), nullptr, nullptr);
+}
 
 LLVM_DUMP_METHOD void Comment::dump(const ASTContext &Context) const {
   dump(llvm::errs(), &Context.getCommentCommandTraits(),
@@ -2186,6 +2237,6 @@ void Comment::dump(raw_ostream &OS, const CommandTraits *Traits,
 
 LLVM_DUMP_METHOD void Comment::dumpColor() const {
   const FullComment *FC = dyn_cast<FullComment>(this);
-  ASTDumper D(llvm::errs(), 0, 0, /*ShowColors*/true);
+  ASTDumper D(llvm::errs(), nullptr, nullptr, /*ShowColors*/true);
   D.dumpFullComment(FC);
 }

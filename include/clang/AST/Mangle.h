@@ -36,33 +36,6 @@ namespace clang {
   struct ThunkInfo;
   class VarDecl;
 
-/// MangleBuffer - a convenient class for storing a name which is
-/// either the result of a mangling or is a constant string with
-/// external memory ownership.
-class MangleBuffer {
-public:
-  void setString(StringRef Ref) {
-    String = Ref;
-  }
-
-  SmallVectorImpl<char> &getBuffer() {
-    return Buffer;
-  }
-
-  StringRef getString() const {
-    if (!String.empty()) return String;
-    return Buffer.str();
-  }
-
-  operator StringRef() const {
-    return getString();
-  }
-
-private:
-  StringRef String;
-  SmallString<256> Buffer;
-};
-
 /// MangleContext - Context for tracking state which persists across multiple
 /// calls to the C++ name mangler.
 class MangleContext {
@@ -130,6 +103,7 @@ public:
                                   const ThisAdjustment &ThisAdjustment,
                                   raw_ostream &) = 0;
   virtual void mangleReferenceTemporary(const VarDecl *D,
+                                        unsigned ManglingNumber,
                                         raw_ostream &) = 0;
   virtual void mangleCXXRTTI(QualType T, raw_ostream &) = 0;
   virtual void mangleCXXRTTIName(QualType T, raw_ostream &) = 0;
@@ -182,6 +156,11 @@ public:
   virtual void mangleItaniumThreadLocalWrapper(const VarDecl *D,
                                                raw_ostream &) = 0;
 
+  virtual void mangleCXXCtorComdat(const CXXConstructorDecl *D,
+                                   raw_ostream &) = 0;
+  virtual void mangleCXXDtorComdat(const CXXDestructorDecl *D,
+                                   raw_ostream &) = 0;
+
   static bool classof(const MangleContext *C) {
     return C->getKind() == MK_Itanium;
   }
@@ -211,6 +190,21 @@ public:
 
   virtual void mangleVirtualMemPtrThunk(const CXXMethodDecl *MD,
                                         raw_ostream &) = 0;
+
+  virtual void mangleCXXRTTIBaseClassDescriptor(
+      const CXXRecordDecl *Derived, uint32_t NVOffset, int32_t VBPtrOffset,
+      uint32_t VBTableOffset, uint32_t Flags, raw_ostream &Out) = 0;
+
+  virtual void mangleCXXRTTIBaseClassArray(const CXXRecordDecl *Derived,
+                                           raw_ostream &Out) = 0;
+  virtual void
+  mangleCXXRTTIClassHierarchyDescriptor(const CXXRecordDecl *Derived,
+                                        raw_ostream &Out) = 0;
+
+  virtual void
+  mangleCXXRTTICompleteObjectLocator(const CXXRecordDecl *Derived,
+                                     ArrayRef<const CXXRecordDecl *> BasePath,
+                                     raw_ostream &Out) = 0;
 
   static bool classof(const MangleContext *C) {
     return C->getKind() == MK_Microsoft;

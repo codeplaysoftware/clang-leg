@@ -14,8 +14,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_FORMAT_BREAKABLETOKEN_H
-#define LLVM_CLANG_FORMAT_BREAKABLETOKEN_H
+#ifndef LLVM_CLANG_LIB_FORMAT_BREAKABLETOKEN_H
+#define LLVM_CLANG_LIB_FORMAT_BREAKABLETOKEN_H
 
 #include "Encoding.h"
 #include "TokenAnnotator.h"
@@ -212,7 +212,7 @@ private:
   // StartOfLineColumn[i] is the target column at which Line[i] should be.
   // Note that this excludes a leading "* " or "*" in case all lines have
   // a "*" prefix.
-  SmallVector<unsigned, 16> StartOfLineColumn;
+  SmallVector<int, 16> StartOfLineColumn;
 
   // The column at which the text of a broken line should start.
   // Note that an optional decoration would go before that column.
@@ -237,4 +237,4 @@ private:
 } // namespace format
 } // namespace clang
 
-#endif // LLVM_CLANG_FORMAT_BREAKABLETOKEN_H
+#endif

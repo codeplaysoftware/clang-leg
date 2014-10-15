@@ -28,6 +28,7 @@
 #include "llvm/Option/OptTable.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Signals.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace clang::driver;
 using namespace clang::tooling;
@@ -179,14 +180,15 @@ private:
 namespace clang_check {
 class ClangCheckActionFactory {
 public:
-  clang::ASTConsumer *newASTConsumer() {
+  std::unique_ptr<clang::ASTConsumer> newASTConsumer() {
     if (ASTList)
       return clang::CreateASTDeclNodeLister();
     if (ASTDump)
-      return clang::CreateASTDumper(ASTDumpFilter);
+      return clang::CreateASTDumper(ASTDumpFilter, /*DumpDecls*/ true,
+                                    /*DumpLookups*/ false);
     if (ASTPrint)
       return clang::CreateASTPrinter(&llvm::outs(), ASTDumpFilter);
-    return new clang::ASTConsumer();
+    return llvm::make_unique<clang::ASTConsumer>();
   }
 };
 }
@@ -215,7 +217,7 @@ int main(int argc, const char **argv) {
         Analyze ? "--analyze" : "-fsyntax-only", InsertAdjuster::BEGIN));
 
   clang_check::ClangCheckActionFactory CheckFactory;
-  FrontendActionFactory *FrontendFactory;
+  std::unique_ptr<FrontendActionFactory> FrontendFactory;
 
   // Choose the correct factory based on the selected mode.
   if (Analyze)
@@ -225,5 +227,5 @@ int main(int argc, const char **argv) {
   else
     FrontendFactory = newFrontendActionFactory(&CheckFactory);
 
-  return Tool.run(FrontendFactory);
+  return Tool.run(FrontendFactory.get());
 }

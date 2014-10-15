@@ -25,6 +25,9 @@ __declspec(dllimport) int GlobalDecl;
 int **__attribute__((dllimport))* GlobalDeclChunkAttr;
 int GlobalDeclAttr __attribute__((dllimport));
 
+// Address of variables can't be used for initialization in C language modes.
+int *VarForInit = &GlobalDecl; // expected-error{{initializer element is not a compile-time constant}}
+
 // Not allowed on definitions.
 __declspec(dllimport) extern int ExternGlobalInit = 1; // expected-error{{definition of dllimport data}}
 __declspec(dllimport) int GlobalInit1 = 1; // expected-error{{definition of dllimport data}}
@@ -61,16 +64,27 @@ int GlobalRedecl2c __attribute__((dllimport));
 __declspec(dllimport) extern int GlobalRedecl3; // expected-note{{previous declaration is here}} expected-note{{previous attribute is here}}
                       extern int GlobalRedecl3; // expected-warning{{'GlobalRedecl3' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
 
+// Adding an attribute on redeclaration.
                       extern int GlobalRedecl4; // expected-note{{previous declaration is here}}
+int useGlobalRedecl4() { return GlobalRedecl4; }
 __declspec(dllimport) extern int GlobalRedecl4; // expected-error{{redeclaration of 'GlobalRedecl4' cannot add 'dllimport' attribute}}
+
+// Allow with a warning if the decl hasn't been used yet.
+                      extern int GlobalRedecl5; // expected-note{{previous declaration is here}}
+__declspec(dllimport) extern int GlobalRedecl5; // expected-warning{{redeclaration of 'GlobalRedecl5' should not add 'dllimport' attribute}}
+
 
 // External linkage is required.
 __declspec(dllimport) static int StaticGlobal; // expected-error{{'StaticGlobal' must have external linkage when declared 'dllimport'}}
+
+// Thread local variables are invalid.
+__declspec(dllimport) __thread int ThreadLocalGlobal; // expected-error{{'ThreadLocalGlobal' cannot be thread local when declared 'dllimport'}}
 
 // Import in local scope.
 __declspec(dllimport) float LocalRedecl1; // expected-note{{previous definition is here}}
 __declspec(dllimport) float LocalRedecl2; // expected-note{{previous definition is here}}
 __declspec(dllimport) float LocalRedecl3; // expected-note{{previous definition is here}}
+__declspec(dllimport) float LocalRedecl4;
 void functionScope() {
   __declspec(dllimport) int LocalRedecl1; // expected-error{{redefinition of 'LocalRedecl1' with a different type: 'int' vs 'float'}}
   int *__attribute__((dllimport)) LocalRedecl2; // expected-error{{redefinition of 'LocalRedecl2' with a different type: 'int *' vs 'float'}}
@@ -81,6 +95,9 @@ void functionScope() {
   __declspec(dllimport) extern int ExternLocalVarDecl;
   __declspec(dllimport) extern int ExternLocalVarDef = 1; // expected-error{{definition of dllimport data}}
   __declspec(dllimport) static int StaticLocalVar; // expected-error{{'StaticLocalVar' must have external linkage when declared 'dllimport'}}
+
+  // Local extern redeclaration does not drop the attribute.
+  extern float LocalRedecl4;
 }
 
 
@@ -96,12 +113,17 @@ __declspec(dllimport)      void decl1B();
 void __attribute__((dllimport)) decl2A();
 void __declspec(dllimport)      decl2B();
 
+// Address of functions can be used for initialization in C language modes.
+// However, the address of the thunk wrapping the function is used instead of
+// the address in the import address table.
+void (*FunForInit)() = &decl2A;
+
 // Not allowed on function definitions.
-__declspec(dllimport) void def() {} // expected-error{{'dllimport' attribute can be applied only to symbol declaration}}
+__declspec(dllimport) void def() {} // expected-error{{dllimport cannot be applied to non-inline function definition}}
 
 // Import inline function.
-__declspec(dllimport) inline void inlineFunc1() {} // expected-warning{{'dllimport' attribute ignored}}
-inline void __attribute__((dllimport)) inlineFunc2() {} // expected-warning{{'dllimport' attribute ignored}}
+__declspec(dllimport) inline void inlineFunc1() {}
+inline void __attribute__((dllimport)) inlineFunc2() {}
 
 // Redeclarations
 __declspec(dllimport) void redecl1();
@@ -116,7 +138,20 @@ __declspec(dllimport) void redecl3(); // expected-note{{previous declaration is 
                       void redecl3() {} // expected-warning{{'redecl3' redeclared without 'dllimport' attribute: previous 'dllimport' ignored}}
 
                       void redecl4(); // expected-note{{previous declaration is here}}
+void useRedecl4() { redecl4(); }
 __declspec(dllimport) void redecl4(); // expected-error{{redeclaration of 'redecl4' cannot add 'dllimport' attribute}}
+
+// Allow with a warning if the decl hasn't been used yet.
+                      void redecl5(); // expected-note{{previous declaration is here}}
+__declspec(dllimport) void redecl5(); // expected-warning{{redeclaration of 'redecl5' should not add 'dllimport' attribute}}
+
+
+// Inline redeclarations are fine.
+__declspec(dllimport) void redecl6();
+                      inline void redecl6() {}
+
+                      void redecl7(); // expected-note{{previous declaration is here}}
+__declspec(dllimport) inline void redecl7() {} // expected-warning{{redeclaration of 'redecl7' should not add 'dllimport' attribute}}
 
 // External linkage is required.
 __declspec(dllimport) static int staticFunc(); // expected-error{{'staticFunc' must have external linkage when declared 'dllimport'}}

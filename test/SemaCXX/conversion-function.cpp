@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify %s 
+// RUN: %clang_cc1 -fsyntax-only -Wbind-to-temporary-copy -verify %s 
 class X { 
 public:
   operator bool();
@@ -26,6 +26,9 @@ class Y {
 public:
   void operator bool(int, ...) const; // expected-error{{conversion function cannot have a return type}} \
   // expected-error{{conversion function cannot have any parameters}}
+
+  operator bool(int a = 4, int b = 6) const; // expected-error{{conversion function cannot have any parameters}}
+  
   
   operator float(...) const;  // expected-error{{conversion function cannot be variadic}}
   

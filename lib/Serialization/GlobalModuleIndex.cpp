@@ -13,7 +13,7 @@
 
 #include "ASTReaderInternals.h"
 #include "clang/Basic/FileManager.h"
-#include "clang/Basic/OnDiskHashTable.h"
+#include "clang/Lex/HeaderSearch.h"
 #include "clang/Serialization/ASTBitCodes.h"
 #include "clang/Serialization/GlobalModuleIndex.h"
 #include "clang/Serialization/Module.h"
@@ -26,6 +26,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/LockFileManager.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/OnDiskHashTable.h"
 #include "llvm/Support/Path.h"
 #include <cstdio>
 using namespace clang;
@@ -71,12 +72,14 @@ public:
   typedef StringRef external_key_type;
   typedef StringRef internal_key_type;
   typedef SmallVector<unsigned, 2> data_type;
+  typedef unsigned hash_value_type;
+  typedef unsigned offset_type;
 
   static bool EqualKey(const internal_key_type& a, const internal_key_type& b) {
     return a == b;
   }
 
-  static unsigned ComputeHash(const internal_key_type& a) {
+  static hash_value_type ComputeHash(const internal_key_type& a) {
     return llvm::HashString(a);
   }
 
@@ -114,15 +117,15 @@ public:
   }
 };
 
-typedef OnDiskChainedHashTable<IdentifierIndexReaderTrait> IdentifierIndexTable;
+typedef llvm::OnDiskIterableChainedHashTable<IdentifierIndexReaderTrait>
+    IdentifierIndexTable;
 
 }
 
-GlobalModuleIndex::GlobalModuleIndex(llvm::MemoryBuffer *Buffer,
+GlobalModuleIndex::GlobalModuleIndex(std::unique_ptr<llvm::MemoryBuffer> Buffer,
                                      llvm::BitstreamCursor Cursor)
-  : Buffer(Buffer), IdentifierIndex(),
-    NumIdentifierLookups(), NumIdentifierLookupHits()
-{
+    : Buffer(std::move(Buffer)), IdentifierIndex(), NumIdentifierLookups(),
+      NumIdentifierLookupHits() {
   // Read the global index.
   bool InGlobalIndexBlock = false;
   bool Done = false;
@@ -202,7 +205,12 @@ GlobalModuleIndex::GlobalModuleIndex(llvm::MemoryBuffer *Buffer,
       assert(Idx == Record.size() && "More module info?");
 
       // Record this module as an unresolved module.
-      UnresolvedModules[llvm::sys::path::stem(Modules[ID].FileName)] = ID;
+      // FIXME: this doesn't work correctly for module names containing path
+      // separators.
+      StringRef ModuleName = llvm::sys::path::stem(Modules[ID].FileName);
+      // Remove the -<hash of ModuleMapPath>
+      ModuleName = ModuleName.rsplit('-').first;
+      UnresolvedModules[ModuleName] = ID;
       break;
     }
 
@@ -210,16 +218,18 @@ GlobalModuleIndex::GlobalModuleIndex(llvm::MemoryBuffer *Buffer,
       // Wire up the identifier index.
       if (Record[0]) {
         IdentifierIndex = IdentifierIndexTable::Create(
-                            (const unsigned char *)Blob.data() + Record[0],
-                            (const unsigned char *)Blob.data(),
-                            IdentifierIndexReaderTrait());
+            (const unsigned char *)Blob.data() + Record[0],
+            (const unsigned char *)Blob.data() + sizeof(uint32_t),
+            (const unsigned char *)Blob.data(), IdentifierIndexReaderTrait());
       }
       break;
     }
   }
 }
 
-GlobalModuleIndex::~GlobalModuleIndex() { }
+GlobalModuleIndex::~GlobalModuleIndex() {
+  delete static_cast<IdentifierIndexTable *>(IdentifierIndex);
+}
 
 std::pair<GlobalModuleIndex *, GlobalModuleIndex::ErrorCode>
 GlobalModuleIndex::readIndex(StringRef Path) {
@@ -228,10 +238,11 @@ GlobalModuleIndex::readIndex(StringRef Path) {
   IndexPath += Path;
   llvm::sys::path::append(IndexPath, IndexFileName);
 
-  std::unique_ptr<llvm::MemoryBuffer> Buffer;
-  if (llvm::MemoryBuffer::getFile(IndexPath.c_str(), Buffer) !=
-      llvm::errc::success)
-    return std::make_pair((GlobalModuleIndex *)0, EC_NotFound);
+  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> BufferOrErr =
+      llvm::MemoryBuffer::getFile(IndexPath.c_str());
+  if (!BufferOrErr)
+    return std::make_pair(nullptr, EC_NotFound);
+  std::unique_ptr<llvm::MemoryBuffer> Buffer = std::move(BufferOrErr.get());
 
   /// \brief The bitstream reader from which we'll read the AST file.
   llvm::BitstreamReader Reader((const unsigned char *)Buffer->getBufferStart(),
@@ -245,10 +256,10 @@ GlobalModuleIndex::readIndex(StringRef Path) {
       Cursor.Read(8) != 'C' ||
       Cursor.Read(8) != 'G' ||
       Cursor.Read(8) != 'I') {
-    return std::make_pair((GlobalModuleIndex *)0, EC_IOError);
+    return std::make_pair(nullptr, EC_IOError);
   }
 
-  return std::make_pair(new GlobalModuleIndex(Buffer.release(), Cursor),
+  return std::make_pair(new GlobalModuleIndex(std::move(Buffer), Cursor),
                         EC_None);
 }
 
@@ -307,7 +318,7 @@ bool GlobalModuleIndex::lookupIdentifier(StringRef Name, HitSet &Hits) {
 
 bool GlobalModuleIndex::loadedModuleFile(ModuleFile *File) {
   // Look for the module in the global module index based on the module name.
-  StringRef Name = llvm::sys::path::stem(File->FileName);
+  StringRef Name = File->ModuleName;
   llvm::StringMap<unsigned>::iterator Known = UnresolvedModules.find(Name);
   if (Known == UnresolvedModules.end()) {
     return true;
@@ -340,6 +351,19 @@ void GlobalModuleIndex::printStats() {
             (double)NumIdentifierLookupHits*100.0/NumIdentifierLookups);
   }
   std::fprintf(stderr, "\n");
+}
+
+void GlobalModuleIndex::dump() {
+  llvm::errs() << "*** Global Module Index Dump:\n";
+  llvm::errs() << "Module files:\n";
+  for (auto &MI : Modules) {
+    llvm::errs() << "** " << MI.FileName << "\n";
+    if (MI.File)
+      MI.File->dump();
+    else
+      llvm::errs() << "\n";
+  }
+  llvm::errs() << "\n";
 }
 
 //----------------------------------------------------------------------------//
@@ -412,7 +436,7 @@ static void emitBlockID(unsigned ID, const char *Name,
   Stream.EmitRecord(llvm::bitc::BLOCKINFO_CODE_SETBID, Record);
 
   // Emit the block name if present.
-  if (Name == 0 || Name[0] == 0) return;
+  if (!Name || Name[0] == 0) return;
   Record.clear();
   while (*Name)
     Record.push_back(*Name++);
@@ -469,9 +493,10 @@ namespace {
 
 bool GlobalModuleIndexBuilder::loadModuleFile(const FileEntry *File) {
   // Open the module file.
-  std::unique_ptr<llvm::MemoryBuffer> Buffer;
+
   std::string ErrorStr;
-  Buffer.reset(FileMgr.getBufferForFile(File, &ErrorStr, /*isVolatile=*/true));
+  std::unique_ptr<llvm::MemoryBuffer> Buffer =
+      FileMgr.getBufferForFile(File, &ErrorStr, /*isVolatile=*/true);
   if (!Buffer) {
     return true;
   }
@@ -591,11 +616,12 @@ bool GlobalModuleIndexBuilder::loadModuleFile(const FileEntry *File) {
 
     // Handle the identifier table
     if (State == ASTBlock && Code == IDENTIFIER_TABLE && Record[0] > 0) {
-      typedef OnDiskChainedHashTable<InterestingASTIdentifierLookupTrait>
-        InterestingIdentifierTable;
+      typedef llvm::OnDiskIterableChainedHashTable<
+          InterestingASTIdentifierLookupTrait> InterestingIdentifierTable;
       std::unique_ptr<InterestingIdentifierTable> Table(
           InterestingIdentifierTable::Create(
               (const unsigned char *)Blob.data() + Record[0],
+              (const unsigned char *)Blob.data() + sizeof(uint32_t),
               (const unsigned char *)Blob.data()));
       for (InterestingIdentifierTable::data_iterator D = Table->data_begin(),
                                                      DEnd = Table->data_end();
@@ -624,8 +650,10 @@ public:
   typedef StringRef key_type_ref;
   typedef SmallVector<unsigned, 2> data_type;
   typedef const SmallVector<unsigned, 2> &data_type_ref;
+  typedef unsigned hash_value_type;
+  typedef unsigned offset_type;
 
-  static unsigned ComputeHash(key_type_ref Key) {
+  static hash_value_type ComputeHash(key_type_ref Key) {
     return llvm::HashString(Key);
   }
 
@@ -696,7 +724,7 @@ void GlobalModuleIndexBuilder::writeIndex(llvm::BitstreamWriter &Stream) {
 
   // Write the identifier -> module file mapping.
   {
-    OnDiskChainedHashTableGenerator<IdentifierIndexWriterTrait> Generator;
+    llvm::OnDiskChainedHashTableGenerator<IdentifierIndexWriterTrait> Generator;
     IdentifierIndexWriterTrait Trait;
 
     // Populate the hash table.
@@ -761,7 +789,7 @@ GlobalModuleIndex::writeIndex(FileManager &FileMgr, StringRef Path) {
   GlobalModuleIndexBuilder Builder(FileMgr);
   
   // Load each of the module files.
-  llvm::error_code EC;
+  std::error_code EC;
   for (llvm::sys::fs::directory_iterator D(Path, EC), DEnd;
        D != DEnd && !EC;
        D.increment(EC)) {

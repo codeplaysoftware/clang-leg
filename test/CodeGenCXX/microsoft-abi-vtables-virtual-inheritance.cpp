@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fno-rtti -emit-llvm -o %t.ll -fdump-vtable-layouts %s -triple=i386-pc-win32 >%t
+// RUN: %clang_cc1 -std=c++11 -fms-extensions -fno-rtti -emit-llvm -o %t.ll -fdump-vtable-layouts %s -triple=i386-pc-win32 >%t
 // RUN: FileCheck %s < %t
 // RUN: FileCheck --check-prefix=MANGLING %s < %t.ll
 
@@ -145,7 +145,7 @@ struct X: virtual C {
   // MANGLING-DAG: @"\01??_7X@Test4@@6B@"
 
   // Also check the mangling of the thunk.
-  // MANGLING-DAG: define weak x86_thiscallcc void @"\01?f@C@@WPPPPPPPI@AEXXZ"
+  // MANGLING-DAG: define linkonce_odr x86_thiscallcc void @"\01?f@C@@WPPPPPPPI@AEXXZ"
 };
 
 X::X() {}
@@ -455,6 +455,35 @@ struct W : virtual X, A {};
 W w;
 }
 
+namespace Test12 {
+struct X : B, A { };
+
+struct Y : X {
+  virtual void f();  // Overrides A::f.
+};
+
+struct Z : virtual Y {
+  // CHECK-LABEL: VFTable for 'A' in 'Test12::X' in 'Test12::Y' in 'Test12::Z' (2 entries).
+  // CHECK-NEXT:   0 | void Test12::Y::f()
+  // CHECK-NEXT:   1 | void A::z()
+
+  int z;
+  // MANGLING-DAG: @"\01??_7Z@Test12@@6BA@@@" = {{.*}}@"\01?f@Y@Test12@@UAEXXZ"
+};
+
+struct W : Z {
+  // CHECK-LABEL: VFTable for 'A' in 'Test12::X' in 'Test12::Y' in 'Test12::Z' in 'Test12::W' (2 entries).
+  // CHECK-NEXT:   0 | void Test12::Y::f()
+  // CHECK-NEXT:   1 | void A::z()
+  W();
+
+  int w;
+  // MANGLING-DAG: @"\01??_7W@Test12@@6BA@@@" = {{.*}}@"\01?f@Y@Test12@@UAEXXZ"
+};
+
+W::W() {}
+}
+
 namespace vdtors {
 struct X {
   virtual ~X();
@@ -696,4 +725,85 @@ D obj;
 // MANGLING-DAG: @"\01??_7A@pr19240@@6B@"
 // MANGLING-DAG: @"\01??_7B@pr19240@@6B@"
 
+}
+
+namespace pr19408 {
+// This test is a non-vtordisp version of the reproducer for PR19408.
+struct X : virtual A {
+  int x;
+};
+
+struct Y : X {
+  virtual void f();
+  int y;
+};
+
+struct Z : Y {
+  // CHECK-LABEL: VFTable for 'A' in 'pr19408::X' in 'pr19408::Y' in 'pr19408::Z' (2 entries).
+  // CHECK-NEXT:   0 | void pr19408::Y::f()
+  // CHECK-NEXT:       [this adjustment: -4 non-virtual]
+  // CHECK-NEXT:   1 | void A::z()
+
+  Z();
+  int z;
+  // MANGLING-DAG: @"\01??_7Z@pr19408@@6B@" = {{.*}}@"\01?f@Y@pr19408@@W3AEXXZ"
+};
+
+Z::Z() {}
+
+struct W : B, Y {
+  // CHECK-LABEL: VFTable for 'A' in 'pr19408::X' in 'pr19408::Y' in 'pr19408::W' (2 entries).
+  // CHECK-NEXT:   0 | void pr19408::Y::f()
+  // CHECK-NEXT:       [this adjustment: -4 non-virtual]
+  // CHECK-NEXT:   1 | void A::z()
+
+  W();
+  int w;
+  // MANGLING-DAG: @"\01??_7W@pr19408@@6BY@1@@" = {{.*}}@"\01?f@Y@pr19408@@W3AEXXZ"
+};
+
+W::W() {}
+}
+
+namespace Test13 {
+struct A {
+  virtual void f();
+};
+struct __declspec(dllexport) B : virtual A {
+  virtual void f() = 0;
+  // MANGLING-DAG: @"\01??_7B@Test13@@6B@" = weak_odr dllexport unnamed_addr constant [1 x i8*] [i8* bitcast (void ()* @_purecall to i8*)]
+};
+}
+
+namespace pr21031_1 {
+// This ordering of base specifiers regressed in r202425.
+struct A { virtual void f(void); };
+struct B : virtual A { virtual void g(void); };
+struct C : virtual A, B { C(); };
+C::C() {}
+
+// CHECK-LABEL: VFTable for 'pr21031_1::A' in 'pr21031_1::B' in 'pr21031_1::C' (1 entry)
+// CHECK-NEXT:   0 | void pr21031_1::A::f()
+
+// CHECK-LABEL: VFTable for 'pr21031_1::B' in 'pr21031_1::C' (1 entry)
+// CHECK-NEXT:   0 | void pr21031_1::B::g()
+
+// MANGLING-DAG: @"\01??_7C@pr21031_1@@6BB@1@@" = {{.*}} constant [1 x i8*]
+// MANGLING-DAG: @"\01??_7C@pr21031_1@@6B@" = {{.*}} constant [1 x i8*]
+}
+
+namespace pr21031_2 {
+struct A { virtual void f(void); };
+struct B : virtual A { virtual void g(void); };
+struct C : B, virtual A { C(); };
+C::C() {}
+
+// CHECK-LABEL: VFTable for 'pr21031_2::B' in 'pr21031_2::C' (1 entry)
+// CHECK-NEXT:   0 | void pr21031_2::B::g()
+
+// CHECK-LABEL: VFTable for 'pr21031_2::A' in 'pr21031_2::B' in 'pr21031_2::C' (1 entry)
+// CHECK-NEXT:   0 | void pr21031_2::A::f()
+
+// MANGLING-DAG: @"\01??_7C@pr21031_2@@6BA@1@@" = {{.*}} constant [1 x i8*]
+// MANGLING-DAG: @"\01??_7C@pr21031_2@@6BB@1@@" = {{.*}} constant [1 x i8*]
 }

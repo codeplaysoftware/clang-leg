@@ -25,7 +25,7 @@ using namespace clang;
 //===----------------------------------------------------------------------===//
 
 void ObjCListBase::set(void *const* InList, unsigned Elts, ASTContext &Ctx) {
-  List = 0;
+  List = nullptr;
   if (Elts == 0) return;  // Setting to an empty list is a noop.
 
 
@@ -60,7 +60,7 @@ ObjCContainerDecl::getIvarDecl(IdentifierInfo *Id) const {
     if (ObjCIvarDecl *ivar = dyn_cast<ObjCIvarDecl>(*Ivar))
       return ivar;
   }
-  return 0;
+  return nullptr;
 }
 
 // Get the local instance/class method declared in this interface.
@@ -72,7 +72,7 @@ ObjCContainerDecl::getMethod(Selector Sel, bool isInstance,
   if (const ObjCProtocolDecl *Proto = dyn_cast<ObjCProtocolDecl>(this)) {
     if (const ObjCProtocolDecl *Def = Proto->getDefinition())
       if (Def->isHidden() && !AllowHidden)
-        return 0;
+        return nullptr;
   }
 
   // Since instance & class methods can have the same name, the loop below
@@ -90,7 +90,7 @@ ObjCContainerDecl::getMethod(Selector Sel, bool isInstance,
     if (MD && MD->isInstanceMethod() == isInstance)
       return MD;
   }
-  return 0;
+  return nullptr;
 }
 
 /// HasUserDeclaredSetterMethod - This routine returns 'true' if a user declared setter
@@ -157,7 +157,7 @@ ObjCPropertyDecl::findPropertyDecl(const DeclContext *DC,
   if (const ObjCProtocolDecl *Proto = dyn_cast<ObjCProtocolDecl>(DC)) {
     if (const ObjCProtocolDecl *Def = Proto->getDefinition())
       if (Def->isHidden())
-        return 0;
+        return nullptr;
   }
 
   DeclContext::lookup_const_result R = DC->lookup(propertyID);
@@ -166,7 +166,7 @@ ObjCPropertyDecl::findPropertyDecl(const DeclContext *DC,
     if (ObjCPropertyDecl *PD = dyn_cast<ObjCPropertyDecl>(*I))
       return PD;
 
-  return 0;
+  return nullptr;
 }
 
 IdentifierInfo *
@@ -187,7 +187,7 @@ ObjCContainerDecl::FindPropertyDeclaration(IdentifierInfo *PropertyId) const {
   if (const ObjCProtocolDecl *Proto = dyn_cast<ObjCProtocolDecl>(this)) {
     if (const ObjCProtocolDecl *Def = Proto->getDefinition())
       if (Def->isHidden())
-        return 0;
+        return nullptr;
   }
 
   if (ObjCPropertyDecl *PD =
@@ -233,7 +233,7 @@ ObjCContainerDecl::FindPropertyDeclaration(IdentifierInfo *PropertyId) const {
       break;
     }
   }
-  return 0;
+  return nullptr;
 }
 
 void ObjCInterfaceDecl::anchor() { }
@@ -247,8 +247,8 @@ ObjCInterfaceDecl::FindPropertyVisibleInPrimaryClass(
                                             IdentifierInfo *PropertyId) const {
   // FIXME: Should make sure no callers ever do this.
   if (!hasDefinition())
-    return 0;
-  
+    return nullptr;
+
   if (data().ExternallyCompleted)
     LoadExternalDefinition();
 
@@ -261,7 +261,7 @@ ObjCInterfaceDecl::FindPropertyVisibleInPrimaryClass(
     if (ObjCPropertyDecl *P = I->FindPropertyDeclaration(PropertyId))
       return P;
 
-  return 0;
+  return nullptr;
 }
 
 void ObjCInterfaceDecl::collectPropertiesToImplement(PropertyMap &PM,
@@ -294,7 +294,7 @@ const ObjCInterfaceDecl *ObjCInterfaceDecl::isObjCRequiresPropertyDefs() const {
       return Class;
     Class = Class->getSuperClass();
   }
-  return 0;
+  return nullptr;
 }
 
 void ObjCInterfaceDecl::mergeClassExtensionProtocolList(
@@ -350,7 +350,7 @@ ObjCInterfaceDecl::findInterfaceWithDesignatedInitializers() const {
       break;
     IFace = IFace->getSuperClass();
   }
-  return 0;
+  return nullptr;
 }
 
 static bool isIntroducingInitializers(const ObjCInterfaceDecl *D) {
@@ -360,6 +360,12 @@ static bool isIntroducingInitializers(const ObjCInterfaceDecl *D) {
   }
   for (const auto *Ext : D->visible_extensions()) {
     for (const auto *MD : Ext->instance_methods()) {
+      if (MD->getMethodFamily() == OMF_init && !MD->isOverriding())
+        return true;
+    }
+  }
+  if (const auto *ImplD = D->getImplementation()) {
+    for (const auto *MD : ImplD->instance_methods()) {
       if (MD->getMethodFamily() == OMF_init && !MD->isOverriding())
         return true;
     }
@@ -379,11 +385,21 @@ bool ObjCInterfaceDecl::inheritsDesignatedInitializers() const {
     // misleading warnings.
     if (isIntroducingInitializers(this)) {
       data().InheritedDesignatedInitializers = DefinitionData::IDI_NotInherited;
-      return false;
     } else {
-      data().InheritedDesignatedInitializers = DefinitionData::IDI_Inherited;
-      return true;
+      if (auto SuperD = getSuperClass()) {
+        data().InheritedDesignatedInitializers =
+          SuperD->declaresOrInheritsDesignatedInitializers() ?
+            DefinitionData::IDI_Inherited :
+            DefinitionData::IDI_NotInherited;
+      } else {
+        data().InheritedDesignatedInitializers =
+          DefinitionData::IDI_NotInherited;
+      }
     }
+    assert(data().InheritedDesignatedInitializers
+             != DefinitionData::IDI_Unknown);
+    return data().InheritedDesignatedInitializers ==
+        DefinitionData::IDI_Inherited;
   }
   }
 
@@ -467,13 +483,13 @@ ObjCIvarDecl *ObjCInterfaceDecl::lookupInstanceVariable(IdentifierInfo *ID,
                                               ObjCInterfaceDecl *&clsDeclared) {
   // FIXME: Should make sure no callers ever do this.
   if (!hasDefinition())
-    return 0;  
+    return nullptr;
 
   if (data().ExternallyCompleted)
     LoadExternalDefinition();
 
   ObjCInterfaceDecl* ClassDecl = this;
-  while (ClassDecl != NULL) {
+  while (ClassDecl != nullptr) {
     if (ObjCIvarDecl *I = ClassDecl->getIvarDecl(ID)) {
       clsDeclared = ClassDecl;
       return I;
@@ -488,7 +504,7 @@ ObjCIvarDecl *ObjCInterfaceDecl::lookupInstanceVariable(IdentifierInfo *ID,
       
     ClassDecl = ClassDecl->getSuperClass();
   }
-  return NULL;
+  return nullptr;
 }
 
 /// lookupInheritedClass - This method returns ObjCInterfaceDecl * of the super
@@ -498,18 +514,18 @@ ObjCInterfaceDecl *ObjCInterfaceDecl::lookupInheritedClass(
                                         const IdentifierInfo*ICName) {
   // FIXME: Should make sure no callers ever do this.
   if (!hasDefinition())
-    return 0;
+    return nullptr;
 
   if (data().ExternallyCompleted)
     LoadExternalDefinition();
 
   ObjCInterfaceDecl* ClassDecl = this;
-  while (ClassDecl != NULL) {
+  while (ClassDecl != nullptr) {
     if (ClassDecl->getIdentifier() == ICName)
       return ClassDecl;
     ClassDecl = ClassDecl->getSuperClass();
   }
-  return NULL;
+  return nullptr;
 }
 
 ObjCProtocolDecl *
@@ -518,7 +534,7 @@ ObjCInterfaceDecl::lookupNestedProtocol(IdentifierInfo *Name) {
     if (P->lookupProtocolNamed(Name))
       return P;
   ObjCInterfaceDecl *SuperClass = getSuperClass();
-  return SuperClass ? SuperClass->lookupNestedProtocol(Name) : NULL;
+  return SuperClass ? SuperClass->lookupNestedProtocol(Name) : nullptr;
 }
 
 /// lookupMethod - This method returns an instance/class method by looking in
@@ -533,48 +549,51 @@ ObjCMethodDecl *ObjCInterfaceDecl::lookupMethod(Selector Sel,
 {
   // FIXME: Should make sure no callers ever do this.
   if (!hasDefinition())
-    return 0;
+    return nullptr;
 
   const ObjCInterfaceDecl* ClassDecl = this;
-  ObjCMethodDecl *MethodDecl = 0;
+  ObjCMethodDecl *MethodDecl = nullptr;
 
   if (data().ExternallyCompleted)
     LoadExternalDefinition();
 
   while (ClassDecl) {
+    // 1. Look through primary class.
     if ((MethodDecl = ClassDecl->getMethod(Sel, isInstance)))
       return MethodDecl;
-
-    // Didn't find one yet - look through protocols.
-    for (const auto *I : ClassDecl->protocols())
-      if ((MethodDecl = I->lookupMethod(Sel, isInstance)))
-        return MethodDecl;
     
-    // Didn't find one yet - now look through categories.
-    for (const auto *Cat : ClassDecl->visible_categories()) {
+    // 2. Didn't find one yet - now look through categories.
+    for (const auto *Cat : ClassDecl->visible_categories())
       if ((MethodDecl = Cat->getMethod(Sel, isInstance)))
         if (C != Cat || !MethodDecl->isImplicit())
           return MethodDecl;
 
-      if (!shallowCategoryLookup) {
+    // 3. Didn't find one yet - look through primary class's protocols.
+    for (const auto *I : ClassDecl->protocols())
+      if ((MethodDecl = I->lookupMethod(Sel, isInstance)))
+        return MethodDecl;
+    
+    // 4. Didn't find one yet - now look through categories' protocols
+    if (!shallowCategoryLookup)
+      for (const auto *Cat : ClassDecl->visible_categories()) {
         // Didn't find one yet - look through protocols.
         const ObjCList<ObjCProtocolDecl> &Protocols =
-        Cat->getReferencedProtocols();
+          Cat->getReferencedProtocols();
         for (ObjCList<ObjCProtocolDecl>::iterator I = Protocols.begin(),
              E = Protocols.end(); I != E; ++I)
           if ((MethodDecl = (*I)->lookupMethod(Sel, isInstance)))
             if (C != Cat || !MethodDecl->isImplicit())
               return MethodDecl;
       }
-    }
-
+    
+    
     if (!followSuper)
-      return NULL;
+      return nullptr;
 
-    // Get the super class (if any).
+    // 5. Get to the super class (if any).
     ClassDecl = ClassDecl->getSuperClass();
   }
-  return NULL;
+  return nullptr;
 }
 
 // Will search "local" class/category implementations for a method decl.
@@ -585,12 +604,12 @@ ObjCMethodDecl *ObjCInterfaceDecl::lookupPrivateMethod(
                                    bool Instance) const {
   // FIXME: Should make sure no callers ever do this.
   if (!hasDefinition())
-    return 0;
+    return nullptr;
 
   if (data().ExternallyCompleted)
     LoadExternalDefinition();
 
-  ObjCMethodDecl *Method = 0;
+  ObjCMethodDecl *Method = nullptr;
   if (ObjCImplementationDecl *ImpDecl = getImplementation())
     Method = Instance ? ImpDecl->getInstanceMethod(Sel) 
                       : ImpDecl->getClassMethod(Sel);
@@ -634,7 +653,7 @@ ObjCMethodDecl *ObjCMethodDecl::Create(
 
 ObjCMethodDecl *ObjCMethodDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
   return new (C, ID) ObjCMethodDecl(SourceLocation(), SourceLocation(),
-                                    Selector(), QualType(), 0, 0);
+                                    Selector(), QualType(), nullptr, nullptr);
 }
 
 bool ObjCMethodDecl::isThisDeclarationADesignatedInitializer() const {
@@ -668,7 +687,7 @@ void ObjCMethodDecl::setAsRedeclaration(const ObjCMethodDecl *PrevMethod) {
 void ObjCMethodDecl::setParamsAndSelLocs(ASTContext &C,
                                          ArrayRef<ParmVarDecl*> Params,
                                          ArrayRef<SourceLocation> SelLocs) {
-  ParamsAndSelLocs = 0;
+  ParamsAndSelLocs = nullptr;
   NumParams = Params.size();
   if (Params.empty() && SelLocs.empty())
     return;
@@ -705,9 +724,9 @@ void ObjCMethodDecl::setMethodParams(ASTContext &C,
 /// \brief A definition will return its interface declaration.
 /// An interface declaration will return its definition.
 /// Otherwise it will return itself.
-ObjCMethodDecl *ObjCMethodDecl::getNextRedeclaration() {
+ObjCMethodDecl *ObjCMethodDecl::getNextRedeclarationImpl() {
   ASTContext &Ctx = getASTContext();
-  ObjCMethodDecl *Redecl = 0;
+  ObjCMethodDecl *Redecl = nullptr;
   if (HasRedeclaration)
     Redecl = const_cast<ObjCMethodDecl*>(Ctx.getObjCMethodRedeclaration(this));
   if (Redecl)
@@ -833,6 +852,11 @@ ObjCMethodFamily ObjCMethodDecl::getMethodFamily() const {
       family = OMF_None;
     break;
       
+  case OMF_initialize:
+    if (isInstanceMethod() || !getReturnType()->isVoidType())
+      family = OMF_None;
+    break;
+      
   case OMF_performSelector:
     if (!isInstanceMethod() || !getReturnType()->isObjCIdType())
       family = OMF_None;
@@ -932,8 +956,15 @@ ObjCInterfaceDecl *ObjCMethodDecl::getClassInterface() {
   if (ObjCImplDecl *IMD = dyn_cast<ObjCImplDecl>(getDeclContext()))
     return IMD->getClassInterface();
   if (isa<ObjCProtocolDecl>(getDeclContext()))
-    return 0;
+    return nullptr;
   llvm_unreachable("unknown method context");
+}
+
+SourceRange ObjCMethodDecl::getReturnTypeSourceRange() const {
+  const auto *TSI = getReturnTypeSourceInfo();
+  if (TSI)
+    return TSI->getTypeLoc().getSourceRange();
+  return SourceRange();
 }
 
 static void CollectOverriddenMethodsRecurse(const ObjCContainerDecl *Container,
@@ -1067,11 +1098,11 @@ ObjCMethodDecl::findPropertyDecl(bool CheckOverrides) const {
   Selector Sel = getSelector();
   unsigned NumArgs = Sel.getNumArgs();
   if (NumArgs > 1)
-    return 0;
+    return nullptr;
 
   if (!isInstanceMethod() || getMethodFamily() != OMF_None)
-    return 0;
-  
+    return nullptr;
+
   if (isPropertyAccessor()) {
     const ObjCContainerDecl *Container = cast<ObjCContainerDecl>(getParent());
     // If container is class extension, find its primary class.
@@ -1092,7 +1123,7 @@ ObjCMethodDecl::findPropertyDecl(bool CheckOverrides) const {
   }
 
   if (!CheckOverrides)
-    return 0;
+    return nullptr;
 
   typedef SmallVector<const ObjCMethodDecl *, 8> OverridesTy;
   OverridesTy Overrides;
@@ -1103,8 +1134,7 @@ ObjCMethodDecl::findPropertyDecl(bool CheckOverrides) const {
       return Prop;
   }
 
-  return 0;
-
+  return nullptr;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1119,35 +1149,37 @@ ObjCInterfaceDecl *ObjCInterfaceDecl::Create(const ASTContext &C,
                                              SourceLocation ClassLoc,
                                              bool isInternal){
   ObjCInterfaceDecl *Result = new (C, DC)
-      ObjCInterfaceDecl(DC, atLoc, Id, ClassLoc, PrevDecl, isInternal);
+      ObjCInterfaceDecl(C, DC, atLoc, Id, ClassLoc, PrevDecl, isInternal);
   Result->Data.setInt(!C.getLangOpts().Modules);
   C.getObjCInterfaceType(Result, PrevDecl);
   return Result;
 }
 
-ObjCInterfaceDecl *ObjCInterfaceDecl::CreateDeserialized(ASTContext &C,
+ObjCInterfaceDecl *ObjCInterfaceDecl::CreateDeserialized(const ASTContext &C,
                                                          unsigned ID) {
-  ObjCInterfaceDecl *Result = new (C, ID) ObjCInterfaceDecl(0, SourceLocation(),
-                                                            0, SourceLocation(),
-                                                            0, false);
+  ObjCInterfaceDecl *Result = new (C, ID) ObjCInterfaceDecl(C, nullptr,
+                                                            SourceLocation(),
+                                                            nullptr,
+                                                            SourceLocation(),
+                                                            nullptr, false);
   Result->Data.setInt(!C.getLangOpts().Modules);
   return Result;
 }
 
-ObjCInterfaceDecl::
-ObjCInterfaceDecl(DeclContext *DC, SourceLocation atLoc, IdentifierInfo *Id,
-                  SourceLocation CLoc, ObjCInterfaceDecl *PrevDecl,
-                  bool isInternal)
-  : ObjCContainerDecl(ObjCInterface, DC, Id, CLoc, atLoc),
-    TypeForDecl(0), Data()
-{
+ObjCInterfaceDecl::ObjCInterfaceDecl(const ASTContext &C, DeclContext *DC,
+                                     SourceLocation AtLoc, IdentifierInfo *Id,
+                                     SourceLocation CLoc,
+                                     ObjCInterfaceDecl *PrevDecl,
+                                     bool IsInternal)
+    : ObjCContainerDecl(ObjCInterface, DC, Id, CLoc, AtLoc),
+      redeclarable_base(C), TypeForDecl(nullptr), Data() {
   setPreviousDecl(PrevDecl);
   
   // Copy the 'data' pointer over.
   if (PrevDecl)
     Data = PrevDecl->Data;
   
-  setImplicit(isInternal);
+  setImplicit(IsInternal);
 }
 
 void ObjCInterfaceDecl::LoadExternalDefinition() const {
@@ -1182,6 +1214,23 @@ bool ObjCInterfaceDecl::hasDesignatedInitializers() const {
   return data().HasDesignatedInitializers;
 }
 
+StringRef
+ObjCInterfaceDecl::getObjCRuntimeNameAsString() const {
+  if (ObjCRuntimeNameAttr *ObjCRTName = getAttr<ObjCRuntimeNameAttr>())
+    return ObjCRTName->getMetadataName();
+
+  return getName();
+}
+
+StringRef
+ObjCImplementationDecl::getObjCRuntimeNameAsString() const {
+  if (ObjCInterfaceDecl *ID =
+      const_cast<ObjCImplementationDecl*>(this)->getClassInterface())
+    return ID->getObjCRuntimeNameAsString();
+    
+  return getName();
+}
+
 ObjCImplementationDecl *ObjCInterfaceDecl::getImplementation() const {
   if (const ObjCInterfaceDecl *Def = getDefinition()) {
     if (data().ExternallyCompleted)
@@ -1192,7 +1241,7 @@ ObjCImplementationDecl *ObjCInterfaceDecl::getImplementation() const {
   }
   
   // FIXME: Should make sure no callers ever do this.
-  return 0;
+  return nullptr;
 }
 
 void ObjCInterfaceDecl::setImplementation(ObjCImplementationDecl *ImplD) {
@@ -1225,9 +1274,9 @@ namespace {
 ObjCIvarDecl *ObjCInterfaceDecl::all_declared_ivar_begin() {
   // FIXME: Should make sure no callers ever do this.
   if (!hasDefinition())
-    return 0;
-  
-  ObjCIvarDecl *curIvar = 0;
+    return nullptr;
+
+  ObjCIvarDecl *curIvar = nullptr;
   if (!data().IvarList) {
     if (!ivar_empty()) {
       ObjCInterfaceDecl::ivar_iterator I = ivar_begin(), E = ivar_end();
@@ -1297,7 +1346,7 @@ ObjCCategoryDecl *
 ObjCInterfaceDecl::FindCategoryDeclaration(IdentifierInfo *CategoryId) const {
   // FIXME: Should make sure no callers ever do this.
   if (!hasDefinition())
-    return 0;
+    return nullptr;
 
   if (data().ExternallyCompleted)
     LoadExternalDefinition();
@@ -1305,8 +1354,8 @@ ObjCInterfaceDecl::FindCategoryDeclaration(IdentifierInfo *CategoryId) const {
   for (auto *Cat : visible_categories())
     if (Cat->getIdentifier() == CategoryId)
       return Cat;
-  
-  return 0;
+
+  return nullptr;
 }
 
 ObjCMethodDecl *
@@ -1317,7 +1366,7 @@ ObjCInterfaceDecl::getCategoryInstanceMethod(Selector Sel) const {
         return MD;
   }
 
-  return 0;
+  return nullptr;
 }
 
 ObjCMethodDecl *ObjCInterfaceDecl::getCategoryClassMethod(Selector Sel) const {
@@ -1326,8 +1375,8 @@ ObjCMethodDecl *ObjCInterfaceDecl::getCategoryClassMethod(Selector Sel) const {
       if (ObjCMethodDecl *MD = Impl->getClassMethod(Sel))
         return MD;
   }
-  
-  return 0;
+
+  return nullptr;
 }
 
 /// ClassImplementsProtocol - Checks that 'lProto' protocol
@@ -1407,7 +1456,7 @@ ObjCIvarDecl *ObjCIvarDecl::Create(ASTContext &C, ObjCContainerDecl *DC,
       else
         ID = cast<ObjCCategoryDecl>(DC)->getClassInterface();
     }
-    ID->setIvarList(0);
+    ID->setIvarList(nullptr);
   }
 
   return new (C, DC) ObjCIvarDecl(DC, StartLoc, IdLoc, Id, T, TInfo, ac, BW,
@@ -1415,8 +1464,9 @@ ObjCIvarDecl *ObjCIvarDecl::Create(ASTContext &C, ObjCContainerDecl *DC,
 }
 
 ObjCIvarDecl *ObjCIvarDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
-  return new (C, ID) ObjCIvarDecl(0, SourceLocation(), SourceLocation(), 0,
-                                  QualType(), 0, ObjCIvarDecl::None, 0, false);
+  return new (C, ID) ObjCIvarDecl(nullptr, SourceLocation(), SourceLocation(),
+                                  nullptr, QualType(), nullptr,
+                                  ObjCIvarDecl::None, nullptr, false);
 }
 
 const ObjCInterfaceDecl *ObjCIvarDecl::getContainingInterface() const {
@@ -1458,8 +1508,9 @@ ObjCAtDefsFieldDecl
 
 ObjCAtDefsFieldDecl *ObjCAtDefsFieldDecl::CreateDeserialized(ASTContext &C,
                                                              unsigned ID) {
-  return new (C, ID) ObjCAtDefsFieldDecl(0, SourceLocation(), SourceLocation(),
-                                         0, QualType(), 0);
+  return new (C, ID) ObjCAtDefsFieldDecl(nullptr, SourceLocation(),
+                                         SourceLocation(), nullptr, QualType(),
+                                         nullptr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1468,12 +1519,12 @@ ObjCAtDefsFieldDecl *ObjCAtDefsFieldDecl::CreateDeserialized(ASTContext &C,
 
 void ObjCProtocolDecl::anchor() { }
 
-ObjCProtocolDecl::ObjCProtocolDecl(DeclContext *DC, IdentifierInfo *Id,
-                                   SourceLocation nameLoc, 
+ObjCProtocolDecl::ObjCProtocolDecl(ASTContext &C, DeclContext *DC,
+                                   IdentifierInfo *Id, SourceLocation nameLoc,
                                    SourceLocation atStartLoc,
                                    ObjCProtocolDecl *PrevDecl)
-  : ObjCContainerDecl(ObjCProtocol, DC, Id, nameLoc, atStartLoc), Data()
-{
+    : ObjCContainerDecl(ObjCProtocol, DC, Id, nameLoc, atStartLoc),
+      redeclarable_base(C), Data() {
   setPreviousDecl(PrevDecl);
   if (PrevDecl)
     Data = PrevDecl->Data;
@@ -1485,7 +1536,7 @@ ObjCProtocolDecl *ObjCProtocolDecl::Create(ASTContext &C, DeclContext *DC,
                                            SourceLocation atStartLoc,
                                            ObjCProtocolDecl *PrevDecl) {
   ObjCProtocolDecl *Result =
-      new (C, DC) ObjCProtocolDecl(DC, Id, nameLoc, atStartLoc, PrevDecl);
+      new (C, DC) ObjCProtocolDecl(C, DC, Id, nameLoc, atStartLoc, PrevDecl);
   Result->Data.setInt(!C.getLangOpts().Modules);
   return Result;
 }
@@ -1493,7 +1544,8 @@ ObjCProtocolDecl *ObjCProtocolDecl::Create(ASTContext &C, DeclContext *DC,
 ObjCProtocolDecl *ObjCProtocolDecl::CreateDeserialized(ASTContext &C,
                                                        unsigned ID) {
   ObjCProtocolDecl *Result =
-      new (C, ID) ObjCProtocolDecl(0, 0, SourceLocation(), SourceLocation(), 0);
+      new (C, ID) ObjCProtocolDecl(C, nullptr, nullptr, SourceLocation(),
+                                   SourceLocation(), nullptr);
   Result->Data.setInt(!C.getLangOpts().Modules);
   return Result;
 }
@@ -1508,20 +1560,20 @@ ObjCProtocolDecl *ObjCProtocolDecl::lookupProtocolNamed(IdentifierInfo *Name) {
     if ((PDecl = I->lookupProtocolNamed(Name)))
       return PDecl;
 
-  return NULL;
+  return nullptr;
 }
 
 // lookupMethod - Lookup a instance/class method in the protocol and protocols
 // it inherited.
 ObjCMethodDecl *ObjCProtocolDecl::lookupMethod(Selector Sel,
                                                bool isInstance) const {
-  ObjCMethodDecl *MethodDecl = NULL;
+  ObjCMethodDecl *MethodDecl = nullptr;
 
   // If there is no definition or the definition is hidden, we don't find
   // anything.
   const ObjCProtocolDecl *Def = getDefinition();
   if (!Def || Def->isHidden())
-    return NULL;
+    return nullptr;
 
   if ((MethodDecl = getMethod(Sel, isInstance)))
     return MethodDecl;
@@ -1529,7 +1581,7 @@ ObjCMethodDecl *ObjCProtocolDecl::lookupMethod(Selector Sel,
   for (const auto *I : protocols())
     if ((MethodDecl = I->lookupMethod(Sel, isInstance)))
       return MethodDecl;
-  return NULL;
+  return nullptr;
 }
 
 void ObjCProtocolDecl::allocateDefinitionData() {
@@ -1583,6 +1635,14 @@ void ObjCProtocolDecl::collectInheritedProtocolProperties(
   }
 }
 
+StringRef
+ObjCProtocolDecl::getObjCRuntimeNameAsString() const {
+  if (ObjCRuntimeNameAttr *ObjCRTName = getAttr<ObjCRuntimeNameAttr>())
+    return ObjCRTName->getMetadataName();
+
+  return getName();
+}
+
 //===----------------------------------------------------------------------===//
 // ObjCCategoryDecl
 //===----------------------------------------------------------------------===//
@@ -1615,8 +1675,9 @@ ObjCCategoryDecl *ObjCCategoryDecl::Create(ASTContext &C, DeclContext *DC,
 
 ObjCCategoryDecl *ObjCCategoryDecl::CreateDeserialized(ASTContext &C,
                                                        unsigned ID) {
-  return new (C, ID) ObjCCategoryDecl(0, SourceLocation(), SourceLocation(),
-                                      SourceLocation(), 0, 0);
+  return new (C, ID) ObjCCategoryDecl(nullptr, SourceLocation(),
+                                      SourceLocation(), SourceLocation(),
+                                      nullptr, nullptr);
 }
 
 ObjCCategoryImplDecl *ObjCCategoryDecl::getImplementation() const {
@@ -1650,15 +1711,16 @@ ObjCCategoryImplDecl::Create(ASTContext &C, DeclContext *DC,
 
 ObjCCategoryImplDecl *ObjCCategoryImplDecl::CreateDeserialized(ASTContext &C, 
                                                                unsigned ID) {
-  return new (C, ID) ObjCCategoryImplDecl(0, 0, 0, SourceLocation(),
-                                          SourceLocation(), SourceLocation());
+  return new (C, ID) ObjCCategoryImplDecl(nullptr, nullptr, nullptr,
+                                          SourceLocation(), SourceLocation(),
+                                          SourceLocation());
 }
 
 ObjCCategoryDecl *ObjCCategoryImplDecl::getCategoryDecl() const {
   // The class interface might be NULL if we are working with invalid code.
   if (const ObjCInterfaceDecl *ID = getClassInterface())
     return ID->FindCategoryDeclaration(getIdentifier());
-  return 0;
+  return nullptr;
 }
 
 
@@ -1697,7 +1759,7 @@ FindPropertyImplIvarDecl(IdentifierInfo *ivarId) const {
     if (PID->getPropertyIvarDecl() &&
         PID->getPropertyIvarDecl()->getIdentifier() == ivarId)
       return PID;
-  return 0;
+  return nullptr;
 }
 
 /// FindPropertyImplDecl - This method looks up a previous ObjCPropertyImplDecl
@@ -1709,7 +1771,7 @@ FindPropertyImplDecl(IdentifierInfo *Id) const {
   for (auto *PID : property_impls())
     if (PID->getPropertyDecl()->getIdentifier() == Id)
       return PID;
-  return 0;
+  return nullptr;
 }
 
 raw_ostream &clang::operator<<(raw_ostream &OS,
@@ -1742,8 +1804,8 @@ ObjCImplementationDecl::Create(ASTContext &C, DeclContext *DC,
 
 ObjCImplementationDecl *
 ObjCImplementationDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
-  return new (C, ID) ObjCImplementationDecl(0, 0, 0, SourceLocation(),
-                                            SourceLocation());
+  return new (C, ID) ObjCImplementationDecl(nullptr, nullptr, nullptr,
+                                            SourceLocation(), SourceLocation());
 }
 
 void ObjCImplementationDecl::setIvarInitializers(ASTContext &C,
@@ -1781,7 +1843,8 @@ ObjCCompatibleAliasDecl::Create(ASTContext &C, DeclContext *DC,
 
 ObjCCompatibleAliasDecl *
 ObjCCompatibleAliasDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
-  return new (C, ID) ObjCCompatibleAliasDecl(0, SourceLocation(), 0, 0);
+  return new (C, ID) ObjCCompatibleAliasDecl(nullptr, SourceLocation(),
+                                             nullptr, nullptr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1802,8 +1865,9 @@ ObjCPropertyDecl *ObjCPropertyDecl::Create(ASTContext &C, DeclContext *DC,
 
 ObjCPropertyDecl *ObjCPropertyDecl::CreateDeserialized(ASTContext &C,
                                                        unsigned ID) {
-  return new (C, ID) ObjCPropertyDecl(0, SourceLocation(), 0, SourceLocation(),
-                                      SourceLocation(), 0);
+  return new (C, ID) ObjCPropertyDecl(nullptr, SourceLocation(), nullptr,
+                                      SourceLocation(), SourceLocation(),
+                                      nullptr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1824,8 +1888,9 @@ ObjCPropertyImplDecl *ObjCPropertyImplDecl::Create(ASTContext &C,
 
 ObjCPropertyImplDecl *ObjCPropertyImplDecl::CreateDeserialized(ASTContext &C,
                                                                unsigned ID) {
-  return new (C, ID) ObjCPropertyImplDecl(0, SourceLocation(), SourceLocation(),
-                                          0, Dynamic, 0, SourceLocation());
+  return new (C, ID) ObjCPropertyImplDecl(nullptr, SourceLocation(),
+                                          SourceLocation(), nullptr, Dynamic,
+                                          nullptr, SourceLocation());
 }
 
 SourceRange ObjCPropertyImplDecl::getSourceRange() const {

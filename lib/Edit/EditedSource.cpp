@@ -158,7 +158,7 @@ void EditedSource::commitRemove(SourceLocation OrigLoc,
   }
 
   FileOffset TopBegin, TopEnd;
-  FileEdit *TopFA = 0;
+  FileEdit *TopFA = nullptr;
 
   if (I == FileEdits.end()) {
     FileEditsTy::iterator
@@ -279,6 +279,12 @@ static void adjustRemoval(const SourceManager &SM, const LangOptions &LangOpts,
 
   unsigned begin = offs.getOffset();
   unsigned end = begin + len;
+
+  // Do not try to extend the removal if we're at the end of the buffer already.
+  if (end == buffer.size())
+    return;
+
+  assert(begin < buffer.size() && end < buffer.size() && "Invalid range!");
 
   // FIXME: Remove newline.
 

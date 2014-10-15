@@ -602,7 +602,7 @@ struct A { constexpr A(int a, int b) : k(a + b) {} int k; };
 constexpr int fn(const A &a) { return a.k; }
 static_assert(fn(A(4,5)) == 9, "");
 
-struct B { int n; int m; } constexpr b = { 0, b.n }; // expected-warning {{uninitialized}}
+struct B { int n; int m; } constexpr b = { 0, b.n };
 struct C {
   constexpr C(C *this_) : m(42), n(this_->m) {} // ok
   int m, n;
@@ -823,6 +823,19 @@ static_assert(X() == 0, "");
 
 }
 
+struct This {
+  constexpr int f() const { return 0; }
+  static constexpr int g() { return 0; }
+  void h() {
+    constexpr int x = f(); // expected-error {{must be initialized by a constant}}
+    // expected-note@-1 {{implicit use of 'this' pointer is only allowed within the evaluation of a call to a 'constexpr' member function}}
+    constexpr int y = this->f(); // expected-error {{must be initialized by a constant}}
+    // expected-note-re@-1 {{{{^}}use of 'this' pointer}}
+    constexpr int z = g();
+    static_assert(z == 0, "");
+  }
+};
+
 }
 
 namespace Temporaries {
@@ -859,6 +872,12 @@ static_assert(f(T(5)) == 5, "");
 
 constexpr bool b(int n) { return &n; }
 static_assert(b(0), "");
+
+struct NonLiteral {
+  NonLiteral();
+  int f();
+};
+constexpr int k = NonLiteral().f(); // expected-error {{constant expression}} expected-note {{non-literal type 'Temporaries::NonLiteral'}}
 
 }
 
@@ -1158,7 +1177,7 @@ namespace ExternConstexpr {
   void f() {
     extern constexpr int i; // expected-error {{constexpr variable declaration must be a definition}}
     constexpr int j = 0;
-    constexpr int k; // expected-error {{default initialization of an object of const type}}
+    constexpr int k; // expected-error {{default initialization of an object of const type}} expected-note{{add an explicit initializer to initialize 'k'}}
   }
 }
 
@@ -1307,6 +1326,49 @@ namespace MutableMembers {
   struct C { B b; };
   constexpr C c[3] = {};
   constexpr int k = c[1].b.a.n; // expected-error {{constant expression}} expected-note {{mutable}}
+
+  struct D { int x; mutable int y; }; // expected-note {{here}}
+  constexpr D d1 = { 1, 2 };
+  int l = ++d1.y;
+  constexpr D d2 = d1; // expected-error {{constant}} expected-note {{mutable}} expected-note {{in call}}
+
+  struct E {
+    union {
+      int a;
+      mutable int b; // expected-note {{here}}
+    };
+  };
+  constexpr E e1 = {{1}};
+  constexpr E e2 = e1; // expected-error {{constant}} expected-note {{mutable}} expected-note {{in call}}
+
+  struct F {
+    union U { };
+    mutable U u;
+    struct X { };
+    mutable X x;
+    struct Y : X { X x; U u; };
+    mutable Y y;
+    int n;
+  };
+  // This is OK; we don't actually read any mutable state here.
+  constexpr F f1 = {};
+  constexpr F f2 = f1;
+
+  struct G {
+    struct X {};
+    union U { X a; };
+    mutable U u; // expected-note {{here}}
+  };
+  constexpr G g1 = {};
+  constexpr G g2 = g1; // expected-error {{constant}} expected-note {{mutable}} expected-note {{in call}}
+  constexpr G::U gu1 = {};
+  constexpr G::U gu2 = gu1;
+
+  union H {
+    mutable G::X gx; // expected-note {{here}}
+  };
+  constexpr H h1 = {};
+  constexpr H h2 = h1; // expected-error {{constant}} expected-note {{mutable}} expected-note {{in call}}
 }
 
 namespace Fold {
@@ -1424,7 +1486,7 @@ namespace InvalidClasses {
 
 namespace NamespaceAlias {
   constexpr int f() {
-    namespace NS = NamespaceAlias; // expected-warning {{use of this statement in a constexpr function is a C++1y extension}}
+    namespace NS = NamespaceAlias; // expected-warning {{use of this statement in a constexpr function is a C++14 extension}}
     return &NS::f != nullptr;
   }
 }
@@ -1681,7 +1743,7 @@ namespace VirtualFromBase {
   template <typename T> struct X : T {
     constexpr X() {}
     double d = 0.0;
-    constexpr int f() { return sizeof(T); } // expected-warning {{will not be implicitly 'const' in C++1y}}
+    constexpr int f() { return sizeof(T); } // expected-warning {{will not be implicitly 'const' in C++14}}
   };
 
   // Virtual f(), not OK.
@@ -1696,17 +1758,17 @@ namespace VirtualFromBase {
 }
 
 namespace ConstexprConstructorRecovery {
-  class X { 
-  public: 
-      enum E : short { 
-          headers = 0x1, 
-          middlefile = 0x2, 
-          choices = 0x4 
-      }; 
-      constexpr X() noexcept {}; 
-  protected: 
+  class X {
+  public:
+      enum E : short {
+          headers = 0x1,
+          middlefile = 0x2,
+          choices = 0x4
+      };
+      constexpr X() noexcept {};
+  protected:
       E val{0}; // expected-error {{cannot initialize a member subobject of type 'ConstexprConstructorRecovery::X::E' with an rvalue of type 'int'}}
-  }; 
+  };
   constexpr X x{};
 }
 

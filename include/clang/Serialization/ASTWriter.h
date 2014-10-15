@@ -11,8 +11,8 @@
 //  containing a serialized representation of a translation unit.
 //
 //===----------------------------------------------------------------------===//
-#ifndef LLVM_CLANG_FRONTEND_AST_WRITER_H
-#define LLVM_CLANG_FRONTEND_AST_WRITER_H
+#ifndef LLVM_CLANG_SERIALIZATION_ASTWRITER_H
+#define LLVM_CLANG_SERIALIZATION_ASTWRITER_H
 
 #include "clang/AST/ASTMutationListener.h"
 #include "clang/AST/Decl.h"
@@ -283,6 +283,10 @@ private:
   llvm::DenseMap<const MacroDefinition *, serialization::PreprocessedEntityID>
       MacroDefinitions;
 
+  /// \brief Cache of indices of anonymous declarations within their lexical
+  /// contexts.
+  llvm::DenseMap<const Decl *, unsigned> AnonymousDeclarationNumbers;
+
   /// An update to a Decl.
   class DeclUpdate {
     /// A DeclUpdateKind.
@@ -295,7 +299,7 @@ private:
     };
 
   public:
-    DeclUpdate(unsigned Kind) : Kind(Kind), Dcl(0) {}
+    DeclUpdate(unsigned Kind) : Kind(Kind), Dcl(nullptr) {}
     DeclUpdate(unsigned Kind, const Decl *Dcl) : Kind(Kind), Dcl(Dcl) {}
     DeclUpdate(unsigned Kind, QualType Type)
         : Kind(Kind), Type(Type.getAsOpaquePtr()) {}
@@ -466,7 +470,12 @@ private:
   void WritePragmaDiagnosticMappings(const DiagnosticsEngine &Diag,
                                      bool isModule);
   void WriteCXXBaseSpecifiersOffsets();
+
+  unsigned TypeExtQualAbbrev;
+  unsigned TypeFunctionProtoAbbrev;
+  void WriteTypeAbbrevs();
   void WriteType(QualType T);
+
   uint32_t GenerateNameLookupTable(const DeclContext *DC,
                                    llvm::SmallVectorImpl<char> &LookupTable);
   uint64_t WriteDeclContextLexicalBlock(ASTContext &Context, DeclContext *DC);
@@ -488,22 +497,26 @@ private:
   void WriteRedeclarations();
   void WriteMergedDecls();
   void WriteLateParsedTemplates(Sema &SemaRef);
+  void WriteOptimizePragmaOptions(Sema &SemaRef);
 
   unsigned DeclParmVarAbbrev;
   unsigned DeclContextLexicalAbbrev;
   unsigned DeclContextVisibleLookupAbbrev;
   unsigned UpdateVisibleAbbrev;
-  unsigned DeclRefExprAbbrev;
-  unsigned CharacterLiteralAbbrev;
   unsigned DeclRecordAbbrev;
-  unsigned IntegerLiteralAbbrev;
   unsigned DeclTypedefAbbrev;
   unsigned DeclVarAbbrev;
   unsigned DeclFieldAbbrev;
   unsigned DeclEnumAbbrev;
   unsigned DeclObjCIvarAbbrev;
+  unsigned DeclCXXMethodAbbrev;
 
-  void WriteDeclsBlockAbbrevs();
+  unsigned DeclRefExprAbbrev;
+  unsigned CharacterLiteralAbbrev;
+  unsigned IntegerLiteralAbbrev;
+  unsigned ExprImplicitCastAbbrev;
+
+  void WriteDeclAbbrevs();
   void WriteDecl(ASTContext &Context, Decl *D);
   void AddFunctionDefinition(const FunctionDecl *FD, RecordData &Record);
 
@@ -630,6 +643,7 @@ public:
                              DeclarationName Name, RecordDataImpl &Record);
   void AddDeclarationNameInfo(const DeclarationNameInfo &NameInfo,
                               RecordDataImpl &Record);
+  unsigned getAnonymousDeclarationNumber(const NamedDecl *D);
 
   void AddQualifierInfo(const QualifierInfo &Info, RecordDataImpl &Record);
 
@@ -676,9 +690,7 @@ public:
   void AddVersionTuple(const VersionTuple &Version, RecordDataImpl &Record);
 
   /// \brief Mark a declaration context as needing an update.
-  void AddUpdatedDeclContext(const DeclContext *DC) {
-    UpdatedDeclContexts.insert(DC);
-  }
+  void AddUpdatedDeclContext(const DeclContext *DC);
 
   void RewriteDecl(const Decl *D) {
     DeclsToRewrite.insert(D);
@@ -732,16 +744,26 @@ public:
 
   void ClearSwitchCaseIDs();
 
+  unsigned getTypeExtQualAbbrev() const {
+    return TypeExtQualAbbrev;
+  }
+  unsigned getTypeFunctionProtoAbbrev() const {
+    return TypeFunctionProtoAbbrev;
+  }
+
   unsigned getDeclParmVarAbbrev() const { return DeclParmVarAbbrev; }
-  unsigned getDeclRefExprAbbrev() const { return DeclRefExprAbbrev; }
-  unsigned getCharacterLiteralAbbrev() const { return CharacterLiteralAbbrev; }
   unsigned getDeclRecordAbbrev() const { return DeclRecordAbbrev; }
-  unsigned getIntegerLiteralAbbrev() const { return IntegerLiteralAbbrev; }
   unsigned getDeclTypedefAbbrev() const { return DeclTypedefAbbrev; }
   unsigned getDeclVarAbbrev() const { return DeclVarAbbrev; }
   unsigned getDeclFieldAbbrev() const { return DeclFieldAbbrev; }
   unsigned getDeclEnumAbbrev() const { return DeclEnumAbbrev; }
   unsigned getDeclObjCIvarAbbrev() const { return DeclObjCIvarAbbrev; }
+  unsigned getDeclCXXMethodAbbrev() const { return DeclCXXMethodAbbrev; }
+
+  unsigned getDeclRefExprAbbrev() const { return DeclRefExprAbbrev; }
+  unsigned getCharacterLiteralAbbrev() const { return CharacterLiteralAbbrev; }
+  unsigned getIntegerLiteralAbbrev() const { return IntegerLiteralAbbrev; }
+  unsigned getExprImplicitCastAbbrev() const { return ExprImplicitCastAbbrev; }
 
   bool hasChain() const { return Chain; }
 

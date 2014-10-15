@@ -81,7 +81,7 @@ void CodeGenTypes::addRecordTypeName(const RecordDecl *RD,
 /// ConvertType in that it is used to convert to the memory representation for
 /// a type.  For example, the scalar representation for _Bool is i1, but the
 /// memory representation is usually i8 or i32, depending on the target.
-llvm::Type *CodeGenTypes::ConvertTypeForMem(QualType T){
+llvm::Type *CodeGenTypes::ConvertTypeForMem(QualType T) {
   llvm::Type *R = ConvertType(T);
 
   // If this is a non-bool type, don't map it.
@@ -187,17 +187,22 @@ static bool isSafeToConvert(const RecordDecl *RD, CodeGenTypes &CGT) {
 /// we've temporarily deferred expanding the type because we're in a recursive
 /// context.
 bool CodeGenTypes::isFuncParamTypeConvertible(QualType Ty) {
+  // Some ABIs cannot have their member pointers represented in IR unless
+  // certain circumstances have been reached.
+  if (const auto *MPT = Ty->getAs<MemberPointerType>())
+    return getCXXABI().isMemberPointerConvertible(MPT);
+
   // If this isn't a tagged type, we can convert it!
   const TagType *TT = Ty->getAs<TagType>();
-  if (TT == 0) return true;
-    
+  if (!TT) return true;
+
   // Incomplete types cannot be converted.
   if (TT->isIncompleteType())
     return false;
-  
+
   // If this is an enum, then it is always safe to convert.
   const RecordType *RT = dyn_cast<RecordType>(TT);
-  if (RT == 0) return true;
+  if (!RT) return true;
 
   // Otherwise, we have to be careful.  If it is a struct that we're in the
   // process of expanding, then we can't convert the function type.  That's ok
@@ -242,6 +247,10 @@ void CodeGenTypes::UpdateCompletedType(const TagDecl *TD) {
       if (!ConvertType(ED->getIntegerType())->isIntegerTy(32))
         TypeCache.clear();
     }
+    // If necessary, provide the full definition of a type only used with a
+    // declaration so far.
+    if (CGDebugInfo *DI = CGM.getModuleDebugInfo())
+      DI->completeType(ED);
     return;
   }
   
@@ -300,7 +309,7 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
     return TCI->second;
 
   // If we don't have it in the cache, convert it now.
-  llvm::Type *ResultType = 0;
+  llvm::Type *ResultType = nullptr;
   switch (Ty->getTypeClass()) {
   case Type::Record: // Handled above.
 #define TYPE(Class, Base)
@@ -349,9 +358,10 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
 
     case BuiltinType::Half:
       // Half FP can either be storage-only (lowered to i16) or native.
-      ResultType = getTypeForFormat(getLLVMContext(),
-          Context.getFloatTypeSemantics(T),
-          Context.getLangOpts().NativeHalfType);
+      ResultType =
+          getTypeForFormat(getLLVMContext(), Context.getFloatTypeSemantics(T),
+                           Context.getLangOpts().NativeHalfType ||
+                               Context.getLangOpts().HalfArgsAndReturns);
       break;
     case BuiltinType::Float:
     case BuiltinType::Double:
@@ -577,6 +587,8 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
   }
 
   case Type::MemberPointer: {
+    if (!getCXXABI().isMemberPointerConvertible(cast<MemberPointerType>(Ty)))
+      return llvm::StructType::create(getLLVMContext());
     ResultType = 
       getCXXABI().ConvertMemberPointerType(cast<MemberPointerType>(Ty));
     break;
@@ -625,7 +637,7 @@ llvm::StructType *CodeGenTypes::ConvertRecordDeclType(const RecordDecl *RD) {
   llvm::StructType *&Entry = RecordDeclTypes[Key];
 
   // If we don't have a StructType at all yet, create the forward declaration.
-  if (Entry == 0) {
+  if (!Entry) {
     Entry = llvm::StructType::create(getLLVMContext());
     addRecordTypeName(RD, Entry, "");
   }
@@ -634,7 +646,7 @@ llvm::StructType *CodeGenTypes::ConvertRecordDeclType(const RecordDecl *RD) {
   // If this is still a forward declaration, or the LLVM type is already
   // complete, there's nothing more to do.
   RD = RD->getDefinition();
-  if (RD == 0 || !RD->isCompleteDefinition() || !Ty->isOpaque())
+  if (!RD || !RD->isCompleteDefinition() || !Ty->isOpaque())
     return Ty;
   
   // If converting this type would cause us to infinitely loop, don't do it!

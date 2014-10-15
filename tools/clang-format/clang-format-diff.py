@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #===- clang-format-diff.py - ClangFormat Diff Reformatter ----*- python -*--===#
 #
@@ -15,9 +15,10 @@ ClangFormat Diff Reformatter
 
 This script reads input from a unified diff and reformats all the changed
 lines. This is useful to reformat all the lines touched by a specific patch.
-Example usage for git users:
+Example usage for git/svn users:
 
   git diff -U0 HEAD^ | clang-format-diff.py -p1 -i
+  svn diff --diff-cmd=diff -x-U0 | clang-format-diff.py -i
 
 """
 

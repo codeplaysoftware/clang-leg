@@ -51,7 +51,7 @@ public:
   
   /// \brief The location of the module definition.
   SourceLocation DefinitionLoc;
-  
+
   /// \brief The parent of this module. This will be NULL for the top-level
   /// module.
   Module *Parent;
@@ -112,8 +112,13 @@ public:
   /// will be false to indicate that this (sub)module is not available.
   SmallVector<Requirement, 2> Requirements;
 
-  /// \brief Whether this module is available in the current
-  /// translation unit.
+  /// \brief Whether this module is missing a feature from \c Requirements.
+  unsigned IsMissingRequirement : 1;
+
+  /// \brief Whether this module is available in the current translation unit.
+  ///
+  /// If the module is missing headers or does not meet all requirements then
+  /// this bit will be 0.
   unsigned IsAvailable : 1;
 
   /// \brief Whether this module was loaded from a module file.
@@ -133,6 +138,9 @@ public:
   /// headers in it within an 'extern "C"' block, and allows the module to be
   /// imported within such a block).
   unsigned IsExternC : 1;
+
+  /// \brief Whether this is an inferred submodule (module * { ... }).
+  unsigned IsInferred : 1;
 
   /// \brief Whether we should infer submodules for this module based on 
   /// the headers.
@@ -264,7 +272,7 @@ public:
   std::vector<Conflict> Conflicts;
 
   /// \brief Construct a new module or submodule.
-  Module(StringRef Name, SourceLocation DefinitionLoc, Module *Parent, 
+  Module(StringRef Name, SourceLocation DefinitionLoc, Module *Parent,
          bool IsFramework, bool IsExplicit);
   
   ~Module();
@@ -290,11 +298,11 @@ public:
                    HeaderDirective &MissingHeader) const;
 
   /// \brief Determine whether this module is a submodule.
-  bool isSubModule() const { return Parent != 0; }
+  bool isSubModule() const { return Parent != nullptr; }
   
   /// \brief Determine whether this module is a submodule of the given other
   /// module.
-  bool isSubModuleOf(Module *Other) const;
+  bool isSubModuleOf(const Module *Other) const;
   
   /// \brief Determine whether this module is a part of a framework,
   /// either because it is a framework module or because it is a submodule
@@ -341,7 +349,8 @@ public:
 
   /// \brief Set the serialized AST file for the top-level module of this module.
   void setASTFile(const FileEntry *File) {
-    assert((getASTFile() == 0 || getASTFile() == File) && "file path changed");
+    assert((File == nullptr || getASTFile() == nullptr ||
+            getASTFile() == File) && "file path changed");
     getTopLevelModule()->ASTFile = File;
   }
 
@@ -393,6 +402,9 @@ public:
                       const LangOptions &LangOpts,
                       const TargetInfo &Target);
 
+  /// \brief Mark this module and all of its submodules as unavailable.
+  void markUnavailable(bool MissingRequirement = false);
+
   /// \brief Find the submodule with the given name.
   ///
   /// \returns The submodule if found, or NULL otherwise.
@@ -400,6 +412,10 @@ public:
 
   /// \brief Determine whether the specified module would be visible to
   /// a lookup at the end of this module.
+  ///
+  /// FIXME: This may return incorrect results for (submodules of) the
+  /// module currently being built, if it's queried before we see all
+  /// of its imports.
   bool isModuleVisible(const Module *M) const {
     if (VisibleModulesCache.empty())
       buildVisibleModulesCache();

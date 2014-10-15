@@ -12,11 +12,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/CharInfo.h"
+#include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/LangOptions.h"
+#include "clang/Basic/OperatorKinds.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdio>
@@ -42,8 +44,8 @@ IdentifierInfo::IdentifierInfo() {
   RevertedTokenID = false;
   OutOfDate = false;
   IsModulesImport = false;
-  FETokenInfo = 0;
-  Entry = 0;
+  FETokenInfo = nullptr;
+  Entry = nullptr;
 }
 
 //===----------------------------------------------------------------------===//
@@ -426,6 +428,7 @@ ObjCMethodFamily Selector::getMethodFamilyImpl(Selector sel) {
     if (name == "retain") return OMF_retain;
     if (name == "retainCount") return OMF_retainCount;
     if (name == "self") return OMF_self;
+    if (name == "initialize") return OMF_initialize;
   }
  
   if (name == "performSelector") return OMF_performSelector;
@@ -484,6 +487,33 @@ ObjCInstanceTypeFamily Selector::getInstTypeMethodFamily(Selector sel) {
   return OIT_None;
 }
 
+ObjCStringFormatFamily Selector::getStringFormatFamilyImpl(Selector sel) {
+  IdentifierInfo *first = sel.getIdentifierInfoForSlot(0);
+  if (!first) return SFF_None;
+  
+  StringRef name = first->getName();
+  
+  switch (name.front()) {
+    case 'a':
+      if (name == "appendFormat") return SFF_NSString;
+      break;
+      
+    case 'i':
+      if (name == "initWithFormat") return SFF_NSString;
+      break;
+      
+    case 'l':
+      if (name == "localizedStringWithFormat") return SFF_NSString;
+      break;
+      
+    case 's':
+      if (name == "stringByAppendingFormat" ||
+          name == "stringWithFormat") return SFF_NSString;
+      break;
+  }
+  return SFF_None;
+}
+
 namespace {
   struct SelectorTableImpl {
     llvm::FoldingSet<MultiKeywordSelector> Table;
@@ -527,7 +557,7 @@ Selector SelectorTable::getSelector(unsigned nKeys, IdentifierInfo **IIV) {
   llvm::FoldingSetNodeID ID;
   MultiKeywordSelector::Profile(ID, IIV, nKeys);
 
-  void *InsertPos = 0;
+  void *InsertPos = nullptr;
   if (MultiKeywordSelector *SI =
         SelTabImpl.Table.FindNodeOrInsertPos(ID, InsertPos))
     return Selector(SI);
@@ -555,7 +585,7 @@ const char *clang::getOperatorSpelling(OverloadedOperatorKind Operator) {
   switch (Operator) {
   case OO_None:
   case NUM_OVERLOADED_OPERATORS:
-    return 0;
+    return nullptr;
 
 #define OVERLOADED_OPERATOR(Name,Spelling,Token,Unary,Binary,MemberOnly) \
   case OO_##Name: return Spelling;

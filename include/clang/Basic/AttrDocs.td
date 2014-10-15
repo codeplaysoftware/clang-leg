@@ -27,6 +27,31 @@ This page lists the attributes currently supported by Clang.
 }];
 }
 
+def SectionDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+The ``section`` attribute allows you to specify a specific section a
+global variable or function should be in after translation.
+  }];
+  let Heading = "section (gnu::section, __declspec(allocate))";
+}
+
+def InitSegDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+The attribute applied by ``pragma init_seg()`` controls the section into
+which global initialization function pointers are emitted.  It is only
+available with ``-fms-extensions``.  Typically, this function pointer is
+emitted into ``.CRT$XCU`` on Windows.  The user can change the order of
+initialization by using a different section name with the same
+``.CRT$XC`` prefix and a suffix that sorts lexicographically before or
+after the standard ``.CRT$XCU`` sections.  See the init_seg_
+documentation on MSDN for more information.
+
+.. _init_seg: http://msdn.microsoft.com/en-us/library/7977wcck(v=vs.110).aspx
+  }];
+}
+
 def TLSModelDocs : Documentation {
   let Category = DocCatVariable;
   let Content = [{
@@ -42,20 +67,37 @@ TLS models are mutually exclusive.
   }];
 }
 
+def ThreadDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+The ``__declspec(thread)`` attribute declares a variable with thread local
+storage.  It is available under the ``-fms-extensions`` flag for MSVC
+compatibility.  Documentation for the Visual C++ attribute is available on MSDN_.
+
+.. _MSDN: http://msdn.microsoft.com/en-us/library/9w1sdazb.aspx
+
+In Clang, ``__declspec(thread)`` is generally equivalent in functionality to the
+GNU ``__thread`` keyword.  The variable must not have a destructor and must have
+a constant initializer, if any.  The attribute only applies to variables
+declared with static storage duration, such as globals, class static data
+members, and static locals.
+  }];
+}
+
 def CarriesDependencyDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
 The ``carries_dependency`` attribute specifies dependency propagation into and
 out of functions.
 
-When specified on a function or Objective-C method, the ``carries_depedency``
+When specified on a function or Objective-C method, the ``carries_dependency``
 attribute means that the return value carries a dependency out of the function, 
 so that the implementation need not constrain ordering upon return from that
 function. Implementations of the function and its caller may choose to preserve
 dependencies instead of emitting memory ordering instructions such as fences.
 
 Note, this attribute does not change the meaning of the program, but may result
-in generatation of more efficient code.
+in generation of more efficient code.
   }];
 }
 
@@ -112,6 +154,30 @@ def ReleaseCapabilityDocs : Documentation {
 Marks a function as releasing a capability.
   }];
 }
+
+def AssumeAlignedDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+Use ``__attribute__((assume_aligned(<alignment>[,<offset>]))`` on a function
+declaration to specify that the return value of the function (which must be a
+pointer type) has the specified offset, in bytes, from an address with the
+specified alignment. The offset is taken to be zero if omitted.
+
+.. code-block:: c++
+
+  // The returned pointer value has 32-byte alignment.
+  void *a() __attribute__((assume_aligned (32)));
+
+  // The returned pointer value is 4 bytes greater than an address having
+  // 32-byte alignment.
+  void *b() __attribute__((assume_aligned (32, 4)));
+
+Note that this attribute provides information to the compiler regarding a
+condition that the code already ensures is true. It does not cause the compiler
+to enforce the provided alignment assumption.
+  }];
+}
+
 def EnableIfDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
@@ -141,7 +207,7 @@ the type.
 
 The enable_if expression is evaluated as if it were the body of a
 bool-returning constexpr function declared with the arguments of the function
-it is being applied to, then called with the parameters at the callsite. If the
+it is being applied to, then called with the parameters at the call site. If the
 result is false or could not be determined through constant expression
 evaluation, then this overload will not be chosen and the provided string may
 be used in a diagnostic if the compile fails as a result.
@@ -346,6 +412,15 @@ of the condition.
   }];
 }
 
+def NoSplitStackDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+The ``no_split_stack`` attribute disables the emission of the split stack
+preamble for a particular function. It has no effect if ``-fsplit-stack``
+is not specified.
+  }];
+}
+
 def ObjCRequiresSuperDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
@@ -389,6 +464,27 @@ implementation of an override in a subclass does not call super.  For example:
    - (void) AnnotMeth{};
                       ^
   }];
+}
+
+def ObjCRuntimeNameDocs : Documentation {
+    let Category = DocCatFunction;
+    let Content = [{
+By default, the Objective-C interface or protocol identifier is used
+in the metadata name for that object. The `objc_runtime_name`
+attribute allows annotated interfaces or protocols to use the
+specified string argument in the object's metadata name instead of the
+default name.
+        
+**Usage**: ``__attribute__((objc_runtime_name("MyLocalName")))``.  This attribute
+can only be placed before an @protocol or @interface declaration:
+        
+.. code-block:: objc
+        
+  __attribute__((objc_runtime_name("MyLocalName")))
+  @interface Message
+  @end
+        
+    }];
 }
 
 def AvailabilityDocs : Documentation {
@@ -599,7 +695,7 @@ def SetTypestateDocs : Documentation {
   let Category = DocCatConsumed;
   let Content = [{
 Annotate methods that transition an object into a new state with
-``__attribute__((set_typestate(new_state)))``.  The new new state must be
+``__attribute__((set_typestate(new_state)))``.  The new state must be
 unconsumed, consumed, or unknown.
   }];
 }
@@ -843,6 +939,15 @@ expression is compared to the type tag.  There are two supported flags:
   }];
 }
 
+def FlattenDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+The ``flatten`` attribute causes calls within the attributed function to
+be inlined unless it is impossible to do so, for example if the body of the
+callee is unavailable or if the callee has the ``noinline`` attribute.
+  }];
+}
+
 def FormatDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
@@ -868,7 +973,7 @@ Clang implements two kinds of checks with this attribute.
    Clang implements this mostly the same way as GCC, but there is a difference
    for functions that accept a ``va_list`` argument (for example, ``vprintf``).
    GCC does not emit ``-Wformat-nonliteral`` warning for calls to such
-   fuctions.  Clang does not warn if the format string comes from a function
+   functions.  Clang does not warn if the format string comes from a function
    parameter, where the function is annotated with a compatible attribute,
    otherwise it warns.  For example:
 
@@ -903,6 +1008,26 @@ Clang implements two kinds of checks with this attribute.
    In this case Clang does not warn because the format string ``s`` and
    the corresponding arguments are annotated.  If the arguments are
    incorrect, the caller of ``foo`` will receive a warning.
+  }];
+}
+
+def AlignValueDocs : Documentation {
+  let Category = DocCatType;
+  let Content = [{
+The align_value attribute can be added to the typedef of a pointer type or the
+declaration of a variable of pointer or reference type. It specifies that the
+pointer will point to, or the reference will bind to, only objects with at
+least the provided alignment. This alignment value must be some positive power
+of 2.
+
+   .. code-block:: c
+
+     typedef double * aligned_double_ptr __attribute__((align_value(64)));
+     void foo(double & x  __attribute__((align_value(128)),
+              aligned_double_ptr y) { ... }
+
+If the pointer value does not have the specified alignment at runtime, the
+behavior of the program is undefined.
   }];
 }
 
@@ -965,6 +1090,73 @@ specified function can improve the quality of the debugging information
 for that function.
 
 This attribute is incompatible with the ``always_inline`` attribute.
+  }];
+}
+
+def LoopHintDocs : Documentation {
+  let Category = DocCatStmt;
+  let Heading = "#pragma clang loop";
+  let Content = [{
+The ``#pragma clang loop`` directive allows loop optimization hints to be
+specified for the subsequent loop. The directive allows vectorization,
+interleaving, and unrolling to be enabled or disabled. Vector width as well
+as interleave and unrolling count can be manually specified. See
+`language extensions
+<http://clang.llvm.org/docs/LanguageExtensions.html#extensions-for-loop-hint-optimizations>`_
+for details.
+  }];
+}
+
+def UnrollHintDocs : Documentation {
+  let Category = DocCatStmt;
+  let Heading = "#pragma unroll, #pragma nounroll";
+  let Content = [{
+Loop unrolling optimization hints can be specified with ``#pragma unroll`` and
+``#pragma nounroll``. The pragma is placed immediately before a for, while,
+do-while, or c++11 range-based for loop.
+
+Specifying ``#pragma unroll`` without a parameter directs the loop unroller to
+attempt to fully unroll the loop if the trip count is known at compile time:
+
+.. code-block:: c++
+
+  #pragma unroll
+  for (...) {
+    ...
+  }
+
+Specifying the optional parameter, ``#pragma unroll _value_``, directs the
+unroller to unroll the loop ``_value_`` times.  The parameter may optionally be
+enclosed in parentheses:
+
+.. code-block:: c++
+
+  #pragma unroll 16
+  for (...) {
+    ...
+  }
+
+  #pragma unroll(16)
+  for (...) {
+    ...
+  }
+
+Specifying ``#pragma nounroll`` indicates that the loop should not be unrolled:
+
+.. code-block:: c++
+
+  #pragma nounroll
+  for (...) {
+    ...
+  }
+
+``#pragma unroll`` and ``#pragma unroll _value_`` have identical semantics to
+``#pragma clang loop unroll(full)`` and
+``#pragma clang loop unroll_count(_value_)`` respectively. ``#pragma nounroll``
+is equivalent to ``#pragma clang loop unroll(disable)``.  See
+`language extensions
+<http://clang.llvm.org/docs/LanguageExtensions.html#extensions-for-loop-hint-optimizations>`_
+for further details including limitations of the unroll hints.
   }];
 }
 

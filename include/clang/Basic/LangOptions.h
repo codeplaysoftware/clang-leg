@@ -12,14 +12,13 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_LANGOPTIONS_H
-#define LLVM_CLANG_LANGOPTIONS_H
+#ifndef LLVM_CLANG_BASIC_LANGOPTIONS_H
+#define LLVM_CLANG_BASIC_LANGOPTIONS_H
 
 #include "clang/Basic/CommentOptions.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/ObjCRuntime.h"
 #include "clang/Basic/Visibility.h"
-#include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include <string>
 
 namespace clang {
@@ -27,6 +26,9 @@ namespace clang {
 struct SanitizerOptions {
 #define SANITIZER(NAME, ID) unsigned ID : 1;
 #include "clang/Basic/Sanitizers.def"
+  /// \brief Controls how agressive is asan field padding (0: none, 1: least
+  /// aggressive, 2: more aggressive).
+  unsigned SanitizeAddressFieldPadding : 2;
 
   /// \brief Cached set of sanitizer options with all sanitizers disabled.
   static const SanitizerOptions Disabled;
@@ -53,7 +55,7 @@ protected:
 
 /// \brief Keeps track of the various options that can be
 /// enabled, which controls the dialect of C or C++ that is accepted.
-class LangOptions : public RefCountedBase<LangOptions>, public LangOptionsBase {
+class LangOptions : public LangOptionsBase {
 public:
   typedef clang::Visibility Visibility;
   
@@ -88,6 +90,11 @@ public:
 
   /// \brief The name of the current module.
   std::string CurrentModule;
+
+  /// \brief The name of the module that the translation unit is an
+  /// implementation of. Prevents semantic imports, but does not otherwise
+  /// treat this as the CurrentModule.
+  std::string ImplementationOfModule;
 
   /// \brief Options for parsing comments.
   CommentOptions CommentOpts;
